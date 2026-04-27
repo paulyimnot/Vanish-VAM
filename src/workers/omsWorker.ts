@@ -12,8 +12,9 @@
 import { workerData, parentPort, MessagePort } from 'worker_threads';
 import { createHmac, createHash } from 'crypto';
 import https from 'https';
-import Atomics from 'atomics';
+import { Atomics as _Atomics } from 'atomics';
 import { BID_PRICE, ASK_PRICE } from '../shared/sharedBuffer.js';
+import { CircuitBreaker, SystemState } from '../engine/SafetyManager.js';
 
 const {
   sharedBuffer,
@@ -44,6 +45,10 @@ let _totalPnl = 0;
 let _wins = 0;
 let _losses = 0;
 let _halted = false;
+
+const _breaker = new CircuitBreaker(
+  workerData.maxDrawdownUsd as number ?? 500
+);
 
 // ── Kraken REST signing ───────────────────────────────────────────────────────
 function sign(path: string, nonce: number, postData: string): string {
@@ -201,6 +206,21 @@ async function monitorPosition(): Promise<void> {
     msg:  `${hitTarget ? '✅ TARGET' : '🛑 STOP'} hit @ ${exitPrice} | Net P&L: ${netPnl >= 0 ? '+' : ''}$${netPnl.toFixed(4)} | Total: $${_totalPnl.toFixed(4)} | W/L: ${_wins}/${_losses}`,
     pnl: netPnl, totalPnl: _totalPnl, wins: _wins, losses: _losses,
   });
+
+  // ── Safety check after every fill ────────────────────────────────────────
+  const state = _breaker.checkHealth(_totalPnl);
+  if (state === SystemState.EMERGENCY_STOP) {
+    _halted = true;
+    parentPort?.postMessage({
+      type: 'halt',
+      msg: `🚨 CIRCUIT BREAKER — Drawdown $${_breaker.getDrawdown(_totalPnl).toFixed(2)} hit limit. All trading halted.`,
+    });
+  } else if (state === SystemState.WARNING) {
+    parentPort?.postMessage({
+      type: 'warning',
+      msg: `⚠️ WARNING — Drawdown at 50%+ of limit ($${_breaker.getDrawdown(_totalPnl).toFixed(2)}). Proceed with caution.`,
+    });
+  }
 
   _position    = 'flat';
   _entryPrice  = 0;
