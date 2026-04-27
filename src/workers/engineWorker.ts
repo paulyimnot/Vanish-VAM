@@ -6,15 +6,18 @@
  * Evaluates the 3-condition VAM entry signal.
  * Sends typed signal messages to Thread C (OMS) via MessagePort.
  *
- * Design: setImmediate-driven loop (not setInterval) for minimal jitter.
+ * Improvements:
+ *  - Time-of-day filter: skips 00:00–06:00 UTC (thin volume, bad fills)
+ *  - Fee-aware ATR logging: warns when current ATR is below breakeven
+ *  - Signal staleness timestamp so OMS can reject stale signals
  */
 
-import { workerData, parentPort, MessagePort } from 'worker_threads';
-import Atomics from 'atomics';
+import { workerData, parentPort } from 'worker_threads';
+import type { MessagePort } from 'worker_threads';
 import {
-  BID_PRICE, BID_QTY, ASK_PRICE, ASK_QTY, TIMESTAMP,
-  BID_PRICES_START, BID_QTYS_START, ASK_PRICES_START, ASK_QTYS_START,
-  ATR, VWAP, OBI, SIGNAL, SIGNAL_PRICE, SIGNAL_ATR, REGIME_SCORE, VWAP_VOL,
+  BID_PRICE, BID_QTY, ASK_PRICE, ASK_QTY,
+  BID_QTYS_START, ASK_QTYS_START,
+  ATR, VWAP, OBI, SIGNAL, SIGNAL_PRICE, SIGNAL_ATR, REGIME_SCORE,
   DEPTH,
 } from '../shared/sharedBuffer.js';
 
@@ -23,6 +26,7 @@ const {
   atrPeriod, dormantThreshold, volatileThreshold,
   volumeSpikeMultiplier, obiLongThreshold, obiShortThreshold,
   vwapBreakMin, stopAtrMult, targetAtrMult,
+  makerFee,
 } = workerData as {
   sharedBuffer: SharedArrayBuffer;
   omsPort: MessagePort;
@@ -35,33 +39,47 @@ const {
   vwapBreakMin: number;
   stopAtrMult: number;
   targetAtrMult: number;
+  makerFee: number;
 };
 
 const data = new Float64Array(sharedBuffer);
 
-// ── ATR state (Wilder's smoothing) ──────────────────────────────────────────
+// ── ATR state (Wilder's smoothing) ───────────────────────────────────────────
 let _atr = 0;
 let _prevMid = 0;
 let _atrCount = 0;
-const _trBuffer: number[] = new Array(atrPeriod).fill(0);
+const _trBuffer: number[] = new Array(atrPeriod).fill(0) as number[];
 
-// ── VWAP state (rolling, resets on candle boundary) ──────────────────────────
-let _vwapPV = 0; // price * volume cumulative
-let _vwapV  = 0; // volume cumulative
+// ── VWAP state ────────────────────────────────────────────────────────────────
+let _vwapPV = 0;
+let _vwapV  = 0;
 
-// ── Volume tracking for spike detection ──────────────────────────────────────
+// ── Volume ring buffer for spike detection ────────────────────────────────────
 const VOL_WINDOW = 20;
-const _volBuffer: number[] = new Array(VOL_WINDOW).fill(0);
-let   _volIdx = 0;
-let   _volSum = 0;
+const _volBuffer: number[] = new Array(VOL_WINDOW).fill(0) as number[];
+let _volIdx = 0;
+let _volSum = 0;
 
-// ── Signal cooldown ──────────────────────────────────────────────────────────
+// ── Signal cooldown ───────────────────────────────────────────────────────────
 let _lastSignalTs = 0;
-const SIGNAL_COOLDOWN_MS = 60_000; // 60s between signals
+const SIGNAL_COOLDOWN_MS = 30_000; // 30s between signals (reduced from 60s)
 
-// ── Tick budget (check every 100ms max) ──────────────────────────────────────
+// ── Tick budget ───────────────────────────────────────────────────────────────
 let _lastTick = 0;
 const TICK_INTERVAL_MS = 100;
+
+// ── Fee-aware breakeven ATR (per BTC) ────────────────────────────────────────
+// Minimum ATR for the target move to exceed round-trip fees.
+// breakeven = (2 * makerFee * price) / targetAtrMult
+function breakevenAtr(price: number): number {
+  return (2 * makerFee * price) / targetAtrMult;
+}
+
+// ── Time filter: skip 00:00–06:00 UTC (low liquidity) ────────────────────────
+function isTradingHour(): boolean {
+  const hour = new Date().getUTCHours();
+  return hour >= 6; // trade only 06:00–24:00 UTC
+}
 
 function computeOBI(): number {
   let bidVol = 0;
@@ -87,15 +105,12 @@ function updateATR(mid: number, volume: number): void {
       _atr = _trBuffer.reduce((a, b) => a + b, 0) / atrPeriod;
     }
   } else {
-    // Wilder's smoothing
     _atr = (_atr * (atrPeriod - 1) + tr) / atrPeriod;
   }
 
-  // Rolling VWAP
   _vwapPV += mid * volume;
   _vwapV  += volume;
 
-  // Rolling volume buffer for spike detection
   _volSum -= _volBuffer[_volIdx];
   _volBuffer[_volIdx] = volume;
   _volSum += volume;
@@ -112,71 +127,89 @@ function evaluate(): void {
   const bidQty = Atomics.load(data, BID_QTY);
   const askQty = Atomics.load(data, ASK_QTY);
 
-  if (bid === 0 || ask === 0) return; // feed not ready
+  if (bid === 0 || ask === 0) return;
 
   const mid    = (bid + ask) / 2;
-  const spread = ask - bid;
-  const volume = bidQty + askQty; // proxy for tick volume
+  const volume = bidQty + askQty;
 
   updateATR(mid, volume);
+  if (_atr === 0) return;
 
-  if (_atr === 0) return; // need warmup
-
-  const vwap  = _vwapV > 0 ? _vwapPV / _vwapV : mid;
-  const obi   = computeOBI();
+  const vwap   = _vwapV > 0 ? _vwapPV / _vwapV : mid;
+  const obi    = computeOBI();
   const atrPct = _atr / mid;
 
-  // ── Write engine state to shared buffer ───────────────────────────────────
+  // Write engine state
   Atomics.store(data, ATR,          _atr);
   Atomics.store(data, VWAP,         vwap);
   Atomics.store(data, OBI,          obi);
   Atomics.store(data, REGIME_SCORE,
     atrPct < dormantThreshold ? 0 : atrPct > volatileThreshold ? 2 : 1);
 
-  // ── Regime gate ───────────────────────────────────────────────────────────
-  if (atrPct < dormantThreshold) return; // too quiet — fees > edge
+  // Regime gate
+  if (atrPct < dormantThreshold) return;
 
-  // ── Signal cooldown ───────────────────────────────────────────────────────
+  // Time-of-day filter
+  if (!isTradingHour()) return;
+
+  // Fee-aware check — log if ATR is below fee breakeven
+  const minAtr = breakevenAtr(mid);
+  if (_atr < minAtr) {
+    // ATR too small — fees will eat the edge. Skip but log periodically.
+    if (now - _lastSignalTs > 60_000) {
+      parentPort?.postMessage({
+        type: 'status',
+        msg: `ATR $${_atr.toFixed(2)} below fee breakeven $${minAtr.toFixed(2)} — waiting for volatility`,
+      });
+      _lastSignalTs = now; // throttle this log
+    }
+    return;
+  }
+
+  // Signal cooldown
   if (now - _lastSignalTs < SIGNAL_COOLDOWN_MS) return;
 
-  // ── Volume spike check ────────────────────────────────────────────────────
+  // Volume spike check
   const avgVol = _volSum / VOL_WINDOW;
   if (volume < avgVol * volumeSpikeMultiplier) return;
 
-  // ── VWAP breakout + OBI check ─────────────────────────────────────────────
+  // VWAP breakout + OBI
   const distFromVwap = (mid - vwap) / vwap;
 
   if (distFromVwap > vwapBreakMin && obi > obiLongThreshold) {
-    // LONG signal
     _lastSignalTs = now;
     Atomics.store(data, SIGNAL,       1);
     Atomics.store(data, SIGNAL_PRICE, mid);
     Atomics.store(data, SIGNAL_ATR,   _atr);
     omsPort.postMessage({
       signal: 1, price: mid, atr: _atr,
-      stop: mid - _atr * stopAtrMult,
+      stop:   mid - _atr * stopAtrMult,
       target: mid + _atr * targetAtrMult,
       timestamp: now,
     });
-    parentPort?.postMessage({ type: 'signal', msg: `LONG @ ${mid} | ATR: ${_atr.toFixed(2)} | OBI: ${obi.toFixed(3)}` });
+    parentPort?.postMessage({
+      type: 'signal',
+      msg: `LONG @ ${mid.toFixed(2)} | ATR: $${_atr.toFixed(2)} (BE: $${minAtr.toFixed(2)}) | OBI: ${obi.toFixed(3)}`,
+    });
 
   } else if (distFromVwap < -vwapBreakMin && obi < obiShortThreshold) {
-    // SHORT signal
     _lastSignalTs = now;
     Atomics.store(data, SIGNAL,       -1);
     Atomics.store(data, SIGNAL_PRICE, mid);
     Atomics.store(data, SIGNAL_ATR,   _atr);
     omsPort.postMessage({
       signal: -1, price: mid, atr: _atr,
-      stop: mid + _atr * stopAtrMult,
+      stop:   mid + _atr * stopAtrMult,
       target: mid - _atr * targetAtrMult,
       timestamp: now,
     });
-    parentPort?.postMessage({ type: 'signal', msg: `SHORT @ ${mid} | ATR: ${_atr.toFixed(2)} | OBI: ${obi.toFixed(3)}` });
+    parentPort?.postMessage({
+      type: 'signal',
+      msg: `SHORT @ ${mid.toFixed(2)} | ATR: $${_atr.toFixed(2)} (BE: $${minAtr.toFixed(2)}) | OBI: ${obi.toFixed(3)}`,
+    });
   }
 }
 
-// ── Self-scheduling setImmediate loop ─────────────────────────────────────────
 function tick(): void {
   evaluate();
   setImmediate(tick);

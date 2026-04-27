@@ -1,86 +1,107 @@
 /**
  * THREAD C — OMS (Order Management System)
  *
- * Receives signal from Thread B via MessagePort.
- * Places limit orders on Kraken REST API v2.
- * Manages stop loss and take profit monitoring.
- * Reports fills and P&L to main thread.
- *
- * Uses Kraken REST API v2 with HMAC-SHA512 signing (Node crypto built-in).
+ * Improvements over v1:
+ *  - Trailing stop: once profit > 1×ATR, stop moves to breakeven
+ *  - Compound sizing: position size = (balance * riskPct) / stopDistance
+ *  - Signal staleness: rejects signals older than 3 seconds
+ *  - Cleaner strict-TS compliance (no unused vars)
  */
 
-import { workerData, parentPort, MessagePort } from 'worker_threads';
+import { workerData, parentPort } from 'worker_threads';
 import { createHmac, createHash } from 'crypto';
 import https from 'https';
-import { Atomics as _Atomics } from 'atomics';
 import { BID_PRICE, ASK_PRICE } from '../shared/sharedBuffer.js';
 import { CircuitBreaker, SystemState } from '../engine/SafetyManager.js';
 
 const {
   sharedBuffer,
   apiKey, apiSecret,
-  symbol, orderAmount, dryRun,
+  symbol, dryRun,
   maxDailyLossRate, accountBalance,
+  stopAtrMult, makerFee,
+  riskPerTrade,
 } = workerData as {
   sharedBuffer: SharedArrayBuffer;
   apiKey: string;
   apiSecret: string;
   symbol: string;
-  orderAmount: number;
   dryRun: boolean;
   maxDailyLossRate: number;
   accountBalance: number;
+  stopAtrMult: number;
+  makerFee: number;
+  riskPerTrade: number; // fraction e.g. 0.01 = 1%
 };
 
 const data = new Float64Array(sharedBuffer);
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let _position: 'long' | 'short' | 'flat' = 'flat';
-let _entryPrice = 0;
-let _stopPrice  = 0;
-let _targetPrice = 0;
-let _entryOrderId = '';
-let _dailyPnl = 0;
-let _totalPnl = 0;
-let _wins = 0;
+let _entryPrice   = 0;
+let _stopPrice    = 0;
+let _targetPrice  = 0;
+let _tradeAtr     = 0;   // ATR at entry, used for trailing stop calc
+let _tradeQty     = 0;   // actual quantity for this trade
+let _trailingActive = false;
+let _peakPriceSinceEntry = 0; // for trailing stop tracking
+
+let _dailyPnl  = 0;
+let _totalPnl  = 0;
+let _currentBalance = accountBalance;
+let _wins   = 0;
 let _losses = 0;
 let _halted = false;
 
 const _breaker = new CircuitBreaker(
-  workerData.maxDrawdownUsd as number ?? 500
+  (workerData.maxDrawdownUsd as number | undefined) ?? 500
 );
+
+const SIGNAL_MAX_AGE_MS = 3_000; // reject signals older than 3 seconds
+
+// ── Compound position sizing ──────────────────────────────────────────────────
+// Risk a fixed % of current balance per trade.
+// positionSize (BTC) = (balance * riskPct) / (stopDistance in USD)
+function calcPositionSize(price: number, atr: number): number {
+  const stopDistanceUsd = price * atr * stopAtrMult / price; // = atr * stopAtrMult (in USD per BTC)
+  if (stopDistanceUsd <= 0) return 0.001; // safe fallback
+  const rawSize = (_currentBalance * riskPerTrade) / stopDistanceUsd;
+  // Clamp: minimum 0.001 BTC, maximum 0.1 BTC (never over-leverage on small account)
+  return Math.max(0.001, Math.min(0.1, parseFloat(rawSize.toFixed(4))));
+}
 
 // ── Kraken REST signing ───────────────────────────────────────────────────────
 function sign(path: string, nonce: number, postData: string): string {
   const secret = Buffer.from(apiSecret, 'base64');
-  const hash   = createHash('sha256').update(nonce + postData).digest();
+  const hash   = createHash('sha256').update(String(nonce) + postData).digest();
   const msg    = Buffer.concat([Buffer.from(path), hash]);
   return createHmac('sha512', secret).update(msg).digest('base64');
 }
 
-function krakenPost(path: string, params: Record<string, string>): Promise<any> {
+function krakenPost(path: string, params: Record<string, string>): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    const nonce = Date.now() * 1000;
+    const nonce    = Date.now() * 1000;
     const postData = new URLSearchParams({ nonce: String(nonce), ...params }).toString();
-    const sig = sign(path, nonce, postData);
+    const sig      = sign(path, nonce, postData);
 
     const options = {
       hostname: 'api.kraken.com',
       path,
       method: 'POST',
       headers: {
-        'API-Key':  apiKey,
-        'API-Sign': sig,
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'API-Key':       apiKey,
+        'API-Sign':      sig,
+        'Content-Type':  'application/x-www-form-urlencoded',
         'Content-Length': Buffer.byteLength(postData),
       },
     };
 
     const req = https.request(options, (res) => {
       let body = '';
-      res.on('data', (chunk) => body += chunk);
+      res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
       res.on('end', () => {
-        try { resolve(JSON.parse(body)); } catch { reject(new Error(body)); }
+        try { resolve(JSON.parse(body) as Record<string, unknown>); }
+        catch { reject(new Error(body)); }
       });
     });
     req.on('error', reject);
@@ -92,7 +113,7 @@ function krakenPost(path: string, params: Record<string, string>): Promise<any> 
 async function placeLimitOrder(side: 'buy' | 'sell', price: number, qty: number): Promise<string | null> {
   if (dryRun) {
     const id = `DRY-${Date.now()}-${side}`;
-    parentPort?.postMessage({ type: 'order', msg: `[DRY RUN] ${side.toUpperCase()} ${qty} @ ${price} → ${id}` });
+    parentPort?.postMessage({ type: 'order', msg: `[DRY RUN] ${side.toUpperCase()} ${qty} @ ${price.toFixed(2)} → ${id}` });
     return id;
   }
   try {
@@ -100,25 +121,20 @@ async function placeLimitOrder(side: 'buy' | 'sell', price: number, qty: number)
       ordertype: 'limit',
       type:      side,
       volume:    String(qty),
-      price:     String(price),
+      price:     price.toFixed(2),
       pair:      symbol.replace('/', ''),
-      oflags:    'post', // maker-only (post-only): reject if would be taker
+      oflags:    'post', // maker-only
     });
-    if (result.error?.length) throw new Error(result.error.join(', '));
-    const txid = result.result?.txid?.[0] ?? null;
-    parentPort?.postMessage({ type: 'order', msg: `${side.toUpperCase()} ${qty} @ ${price} → ${txid}` });
+    const errors = result['error'] as string[] | undefined;
+    if (errors?.length) throw new Error(errors.join(', '));
+    const txid = (result['result'] as Record<string, string[]> | undefined)?.['txid']?.[0] ?? null;
+    parentPort?.postMessage({ type: 'order', msg: `${side.toUpperCase()} ${qty} @ ${price.toFixed(2)} → ${txid}` });
     return txid;
-  } catch (err: any) {
-    parentPort?.postMessage({ type: 'error', msg: `Order failed: ${err.message}` });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    parentPort?.postMessage({ type: 'error', msg: `Order failed: ${msg}` });
     return null;
   }
-}
-
-async function cancelOrder(txid: string): Promise<void> {
-  if (dryRun) return;
-  try {
-    await krakenPost('/0/private/CancelOrder', { txid });
-  } catch { /* best effort */ }
 }
 
 // ── Signal handler ────────────────────────────────────────────────────────────
@@ -130,43 +146,49 @@ async function onSignal(msg: {
   target: number;
   timestamp: number;
 }): Promise<void> {
-  if (_halted) {
-    parentPort?.postMessage({ type: 'status', msg: 'Signal ignored — bot halted.' });
-    return;
-  }
-  if (_position !== 'flat') {
-    parentPort?.postMessage({ type: 'status', msg: 'Signal ignored — position open.' });
+  if (_halted) { parentPort?.postMessage({ type: 'status', msg: 'Signal ignored — bot halted.' }); return; }
+  if (_position !== 'flat') { parentPort?.postMessage({ type: 'status', msg: 'Signal ignored — position open.' }); return; }
+
+  // Reject stale signals
+  if (Date.now() - msg.timestamp > SIGNAL_MAX_AGE_MS) {
+    parentPort?.postMessage({ type: 'status', msg: `Signal rejected — ${Date.now() - msg.timestamp}ms stale` });
     return;
   }
 
-  // Check daily loss limit
+  // Daily loss check
   if (_dailyPnl / accountBalance <= -maxDailyLossRate) {
     _halted = true;
-    parentPort?.postMessage({ type: 'halt', msg: `Daily loss limit hit (${(_dailyPnl).toFixed(2)} USD). Halted.` });
+    parentPort?.postMessage({ type: 'halt', msg: `Daily loss limit hit ($${_dailyPnl.toFixed(2)}). Halted.` });
     return;
   }
 
   const side = msg.signal === 1 ? 'buy' : 'sell';
   const entryPrice = msg.signal === 1
-    ? msg.price * (1 - 0.0005)  // 0.05% below mid for limit buy (inside spread)
-    : msg.price * (1 + 0.0005); // 0.05% above mid for limit sell
+    ? msg.price * (1 - 0.0005)
+    : msg.price * (1 + 0.0005);
 
-  const txid = await placeLimitOrder(side, entryPrice, orderAmount);
+  // Compound position sizing
+  const qty = calcPositionSize(entryPrice, msg.atr);
+
+  const txid = await placeLimitOrder(side, entryPrice, qty);
   if (!txid) return;
 
-  _position    = msg.signal === 1 ? 'long' : 'short';
-  _entryPrice  = entryPrice;
-  _stopPrice   = msg.stop;
-  _targetPrice = msg.target;
-  _entryOrderId = txid;
+  _position           = msg.signal === 1 ? 'long' : 'short';
+  _entryPrice         = entryPrice;
+  _stopPrice          = msg.stop;
+  _targetPrice        = msg.target;
+  _tradeAtr           = msg.atr;
+  _tradeQty           = qty;
+  _trailingActive     = false;
+  _peakPriceSinceEntry = entryPrice;
 
   parentPort?.postMessage({
     type: 'status',
-    msg: `Position OPEN: ${_position} @ ${entryPrice} | Stop: ${_stopPrice.toFixed(2)} | Target: ${_targetPrice.toFixed(2)}`,
+    msg: `OPEN ${_position.toUpperCase()} ${qty} BTC @ ${entryPrice.toFixed(2)} | Stop: ${_stopPrice.toFixed(2)} | Target: ${_targetPrice.toFixed(2)} | Risk: $${(qty * msg.atr * stopAtrMult).toFixed(2)}`,
   });
 }
 
-// ── Position monitor ──────────────────────────────────────────────────────────
+// ── Position monitor with trailing stop ───────────────────────────────────────
 async function monitorPosition(): Promise<void> {
   if (_position === 'flat' || _halted) return;
 
@@ -174,68 +196,102 @@ async function monitorPosition(): Promise<void> {
   const ask = Atomics.load(data, ASK_PRICE);
   if (bid === 0 || ask === 0) return;
 
-  const currentPrice = _position === 'long' ? bid : ask; // exit against adverse side
+  const currentPrice = _position === 'long' ? bid : ask;
 
-  const hitTarget = _position === 'long'
-    ? currentPrice >= _targetPrice
-    : currentPrice <= _targetPrice;
+  // ── Trailing stop logic ────────────────────────────────────────────────────
+  if (_position === 'long') {
+    if (currentPrice > _peakPriceSinceEntry) _peakPriceSinceEntry = currentPrice;
 
-  const hitStop = _position === 'long'
-    ? currentPrice <= _stopPrice
-    : currentPrice >= _stopPrice;
+    // Activate trailing once we're 1×ATR in profit
+    if (!_trailingActive && currentPrice >= _entryPrice + _tradeAtr) {
+      _trailingActive = true;
+      _stopPrice = _entryPrice; // move stop to breakeven
+      parentPort?.postMessage({ type: 'status', msg: `Trailing stop activated — stop moved to breakeven ${_stopPrice.toFixed(2)}` });
+    }
+    // Keep trailing stop 1×ATR below the peak
+    if (_trailingActive) {
+      const trailStop = _peakPriceSinceEntry - _tradeAtr;
+      if (trailStop > _stopPrice) _stopPrice = trailStop;
+    }
+  } else {
+    if (currentPrice < _peakPriceSinceEntry) _peakPriceSinceEntry = currentPrice;
+
+    if (!_trailingActive && currentPrice <= _entryPrice - _tradeAtr) {
+      _trailingActive = true;
+      _stopPrice = _entryPrice;
+      parentPort?.postMessage({ type: 'status', msg: `Trailing stop activated — stop moved to breakeven ${_stopPrice.toFixed(2)}` });
+    }
+    if (_trailingActive) {
+      const trailStop = _peakPriceSinceEntry + _tradeAtr;
+      if (trailStop < _stopPrice) _stopPrice = trailStop;
+    }
+  }
+
+  // ── Check exit conditions ──────────────────────────────────────────────────
+  const hitTarget = _position === 'long' ? currentPrice >= _targetPrice : currentPrice <= _targetPrice;
+  const hitStop   = _position === 'long' ? currentPrice <= _stopPrice   : currentPrice >= _stopPrice;
 
   if (!hitTarget && !hitStop) return;
 
-  const exitSide = _position === 'long' ? 'sell' : 'buy';
+  const exitSide  = _position === 'long' ? 'sell' : 'buy';
   const exitPrice = hitTarget ? _targetPrice : _stopPrice;
-  const txid = await placeLimitOrder(exitSide, exitPrice, orderAmount);
 
-  // Calculate P&L (simplified — assumes fill at target/stop price)
+  await placeLimitOrder(exitSide, exitPrice, _tradeQty);
+
   const rawPnl = _position === 'long'
-    ? (exitPrice - _entryPrice) * orderAmount
-    : (_entryPrice - exitPrice) * orderAmount;
-  const fees = (exitPrice * orderAmount * 0.0016) + (_entryPrice * orderAmount * 0.0016);
+    ? (exitPrice - _entryPrice) * _tradeQty
+    : (_entryPrice - exitPrice) * _tradeQty;
+  const fees   = (exitPrice * _tradeQty * makerFee) + (_entryPrice * _tradeQty * makerFee);
   const netPnl = rawPnl - fees;
 
   _dailyPnl += netPnl;
   _totalPnl += netPnl;
+  _currentBalance += netPnl; // compound the account
   if (netPnl >= 0) _wins++; else _losses++;
+
+  const winRate = _wins + _losses > 0 ? ((_wins / (_wins + _losses)) * 100).toFixed(1) : 'N/A';
 
   parentPort?.postMessage({
     type: 'fill',
-    msg:  `${hitTarget ? '✅ TARGET' : '🛑 STOP'} hit @ ${exitPrice} | Net P&L: ${netPnl >= 0 ? '+' : ''}$${netPnl.toFixed(4)} | Total: $${_totalPnl.toFixed(4)} | W/L: ${_wins}/${_losses}`,
-    pnl: netPnl, totalPnl: _totalPnl, wins: _wins, losses: _losses,
+    msg: `${hitTarget ? '✅ TARGET' : '🛑 STOP'} | ${netPnl >= 0 ? '+' : ''}$${netPnl.toFixed(4)} | Total: $${_totalPnl.toFixed(4)} | W/L: ${_wins}/${_losses} (${winRate}%) | Balance: $${_currentBalance.toFixed(2)}`,
+    pnl: netPnl, totalPnl: _totalPnl, wins: _wins, losses: _losses, balance: _currentBalance,
   });
 
-  // ── Safety check after every fill ────────────────────────────────────────
+  // Safety check
   const state = _breaker.checkHealth(_totalPnl);
   if (state === SystemState.EMERGENCY_STOP) {
     _halted = true;
     parentPort?.postMessage({
       type: 'halt',
-      msg: `🚨 CIRCUIT BREAKER — Drawdown $${_breaker.getDrawdown(_totalPnl).toFixed(2)} hit limit. All trading halted.`,
+      msg: `🚨 CIRCUIT BREAKER — Drawdown $${_breaker.getDrawdown(_totalPnl).toFixed(2)} hit limit.`,
     });
   } else if (state === SystemState.WARNING) {
     parentPort?.postMessage({
       type: 'warning',
-      msg: `⚠️ WARNING — Drawdown at 50%+ of limit ($${_breaker.getDrawdown(_totalPnl).toFixed(2)}). Proceed with caution.`,
+      msg: `⚠️ WARNING — Drawdown $${_breaker.getDrawdown(_totalPnl).toFixed(2)} at 50%+ of limit.`,
     });
   }
 
-  _position    = 'flat';
-  _entryPrice  = 0;
-  _stopPrice   = 0;
-  _targetPrice = 0;
+  // Reset position state
+  _position           = 'flat';
+  _entryPrice         = 0;
+  _stopPrice          = 0;
+  _targetPrice        = 0;
+  _tradeAtr           = 0;
+  _tradeQty           = 0;
+  _trailingActive     = false;
+  _peakPriceSinceEntry = 0;
 }
 
-// ── Message from Engine (Thread B) ───────────────────────────────────────────
-// Note: omsPort is passed in workerData as MessagePort
-// We receive via parentPort in this simplified architecture
-parentPort?.on('message', (msg: any) => {
-  if (msg?.signal !== undefined) onSignal(msg);
+// ── Incoming signals ──────────────────────────────────────────────────────────
+parentPort?.on('message', (msg: unknown) => {
+  const m = msg as { signal?: number; price?: number; atr?: number; stop?: number; target?: number; timestamp?: number };
+  if (typeof m?.signal === 'number') {
+    void onSignal(m as Parameters<typeof onSignal>[0]);
+  }
 });
 
-// ── Monitor loop (every 250ms) ────────────────────────────────────────────────
-setInterval(() => { monitorPosition(); }, 250);
+// ── Monitor loop (every 100ms for faster stop detection) ─────────────────────
+setInterval(() => { void monitorPosition(); }, 100);
 
-parentPort?.postMessage({ type: 'status', msg: `OMS ready | DryRun: ${dryRun}` });
+parentPort?.postMessage({ type: 'status', msg: `OMS ready | DryRun: ${dryRun} | Balance: $${accountBalance}` });
