@@ -1,0 +1,23 @@
+{
+  "name": "vanish-vam",
+  "version": "1.0.0",
+  "description": "VAM — Velocity Asymmetric Momentum bot. Kraken BTC/USDT. US-legal.",
+  "type": "module",
+  "scripts": {
+    "dev":   "node --loader ts-node/esm src/main.ts",
+    "build": "node build.mjs",
+    "start": "node dist/main.js",
+    "lint":  "tsc --noEmit"
+  },
+  "dependencies": {
+    "ws":     "^8.18.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/ws":   "^8.5.12",
+    "@types/node": "^20.12.12",
+    "typescript":  "^5.4.5",
+    "ts-node":     "^10.9.2",
+    "esbuild":     "^0.21.5"
+  }
+}
