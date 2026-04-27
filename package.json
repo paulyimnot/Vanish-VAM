@@ -4,10 +4,11 @@
   "description": "VAM — Velocity Asymmetric Momentum bot. Kraken BTC/USDT. US-legal.",
   "type": "module",
   "scripts": {
-    "dev":   "node --loader ts-node/esm src/main.ts",
-    "build": "node build.mjs",
-    "start": "node dist/main.js",
-    "lint":  "tsc --noEmit"
+    "dev":      "node --loader ts-node/esm src/main.ts",
+    "backtest": "node --loader ts-node/esm src/backtest.ts",
+    "build":    "node build.mjs",
+    "start":    "node dist/main.js",
+    "lint":     "tsc --noEmit"
   },
   "dependencies": {
     "ws":     "^8.18.0",

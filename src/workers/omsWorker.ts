@@ -9,6 +9,7 @@
  */
 
 import { workerData, parentPort } from 'worker_threads';
+import type { MessagePort } from 'worker_threads';
 import { createHmac, createHash } from 'crypto';
 import https from 'https';
 import { BID_PRICE, ASK_PRICE } from '../shared/sharedBuffer.js';
@@ -16,6 +17,7 @@ import { CircuitBreaker, SystemState } from '../engine/SafetyManager.js';
 
 const {
   sharedBuffer,
+  omsPort,       // ← MessagePort from Engine (Thread B) — this is where signals arrive
   apiKey, apiSecret,
   symbol, dryRun,
   maxDailyLossRate, accountBalance,
@@ -23,6 +25,7 @@ const {
   riskPerTrade,
 } = workerData as {
   sharedBuffer: SharedArrayBuffer;
+  omsPort: MessagePort;
   apiKey: string;
   apiSecret: string;
   symbol: string;
@@ -31,7 +34,7 @@ const {
   accountBalance: number;
   stopAtrMult: number;
   makerFee: number;
-  riskPerTrade: number; // fraction e.g. 0.01 = 1%
+  riskPerTrade: number;
 };
 
 const data = new Float64Array(sharedBuffer);
@@ -283,8 +286,8 @@ async function monitorPosition(): Promise<void> {
   _peakPriceSinceEntry = 0;
 }
 
-// ── Incoming signals ──────────────────────────────────────────────────────────
-parentPort?.on('message', (msg: unknown) => {
+// ── Incoming signals from Engine (Thread B) via MessagePort ───────────────────
+omsPort.on('message', (msg: unknown) => {
   const m = msg as { signal?: number; price?: number; atr?: number; stop?: number; target?: number; timestamp?: number };
   if (typeof m?.signal === 'number') {
     void onSignal(m as Parameters<typeof onSignal>[0]);

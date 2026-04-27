@@ -1,5 +1,5 @@
 # VANISH — VAM Bot
-## AI-to-AI Handover Document v2.0
+## AI-to-AI Handover Document v3.0
 **Strategy:** Velocity Asymmetric Momentum (VAM)  
 **Exchange:** Kraken BTC/USDT (fully US-legal)  
 **Author:** Antigravity (Google DeepMind)  
@@ -13,8 +13,19 @@
 cd VAM_BUILD
 npm install
 cp .env.example .env      # fill in KRAKEN_API_KEY and KRAKEN_API_SECRET
+npm run backtest          # run 6-month backtest — no API key needed!
 npm run dev               # DRY_RUN=true by default — safe to run immediately
 ```
+
+### Backtesting
+
+```bash
+npm run backtest                       # 6 months of Kraken 5-min candles
+npm run backtest -- --days 30          # just 30 days
+npm run backtest -- --csv results.csv  # export trade log to CSV
+```
+
+No API key required — uses Kraken's public OHLC endpoint.
 
 On start you'll see:
 ```
@@ -92,6 +103,7 @@ Safety    SafetyManager.ts   Circuit breaker: HEALTHY / WARNING / EMERGENCY_STOP
 ```
 src/
   main.ts                    Entry point — wires 3 threads + jitter guard
+  backtest.ts                Backtesting engine (fetches Kraken OHLCV, runs full sim)
   shared/
     sharedBuffer.ts           Float64 memory layout (53 elements)
     jitterGuard.ts            setImmediate-based event loop monitor
@@ -99,8 +111,8 @@ src/
     SafetyManager.ts          CircuitBreaker with 3 system states
     Processor.ts              Typed worker pool (2 reusable workers, 500ms timeout)
   workers/
-    feedWorker.ts             Thread A: Kraken WS → SharedArrayBuffer
-    engineWorker.ts           Thread B: ATR/VWAP/OBI → signal
+    feedWorker.ts             Thread A: Kraken WS → SharedArrayBuffer (Atomics)
+    engineWorker.ts           Thread B: ATR/VWAP/OBI + fee gate + time filter → signal
     omsWorker.ts              Thread C: orders + trailing stop + compound sizing
     calcWorker.ts             Pool worker: batch ATR/VWAP/OBI/feature calculations
 .env.example                  All config params documented with defaults
@@ -109,30 +121,41 @@ build.mjs                     esbuild — each worker compiled separately
 
 ---
 
+## Completed
+
+- [x] **MessagePort wiring fixed** — OMS now listens on the transferred `omsPort` for engine signals
+- [x] **Backtesting engine** — `npm run backtest` fetches Kraken 5-min OHLCV, runs full sim with trailing stop + compound sizing + real fees, prints Sharpe / drawdown / profit factor
+- [x] **Trailing stop** — locks in breakeven once 1×ATR in profit, then trails 1×ATR below peak
+- [x] **Compound sizing** — position scales with account balance growth
+- [x] **Fee-aware ATR gate** — engine skips signals when ATR is too small for fees to be covered
+- [x] **Time-of-day filter** — skips 00:00–06:00 UTC (thin volume)
+- [x] **Signal staleness** — OMS rejects signals older than 3 seconds
+- [x] **Circuit breaker** — HEALTHY / WARNING / EMERGENCY_STOP from peak drawdown
+
 ## Next Collaborator Tasks
 
-### Priority 1 — Must fix before live trading
-- [ ] **Fix MessagePort wiring:** engineWorker sends signals via `omsPort` (MessageChannel) but omsWorker currently listens on `parentPort`. Need to pass the port correctly via `transferList` and listen on it in omsWorker
-- [ ] **Backtesting:** Run 3-condition signal on 6 months Kraken 1-min OHLCV. Measure actual win rate, avg winner/loser
-- [ ] **Tune ATR multipliers:** Test stop/target combos: (0.3/0.9), (0.5/1.5), (0.75/2.25) against backtest data
+### Priority 1 — Tuning (use the backtester!)
+- [ ] **Tune ATR multipliers:** Run `npm run backtest` with different STOP_ATR_MULT / TARGET_ATR_MULT combos: (0.3/0.9), (0.5/1.5), (0.75/2.25). Compare win rate vs profit factor
+- [ ] **Tune OBI threshold:** Test 0.55, 0.60, 0.65, 0.70. Tighter = fewer trades but higher win rate
+- [ ] **Tune VWAP_BREAK_MIN:** Test 0.001, 0.0015, 0.002. Wider = fewer signals, more conviction
 
-### Priority 2 — Profitability improvements
-- [ ] **LightGBM ML filter:** Train on 8 features (OBI, volume ratio, VWAP distance, ATR regime, time-of-day sin/cos, momentum-5, momentum-10, volatility ratio). Label: did price hit 1.5×ATR before 0.5×ATR stop? Filter: only trade if P(success) > 0.52
+### Priority 2 — Profitability (ML layer)
+- [ ] **LightGBM filter:** Train on 8 features (OBI, volume ratio, VWAP distance, ATR regime, time-of-day sin/cos, momentum-5, momentum-10, volatility ratio). Label: did price hit target before stop? Only trade if P(success) > 0.52
 - [ ] **ONNX export + inference:** Add `onnxruntime-node` to package.json, load model in engineWorker, run in Processor pool
 
-### Priority 3 — Production readiness
-- [ ] **Prometheus metrics:** `/metrics` endpoint with trade count, P&L, win rate, ATR, OBI
+### Priority 3 — Production
 - [ ] **Telegram alerts:** Send message on FILL, HALT, WARNING events
-- [ ] **VPS deployment:** Hetzner or Vultr, closest datacenter to Kraken (Frankfurt/London)
-- [ ] **Fill confirmation:** Poll Kraken `/0/private/QueryOrders` to confirm limit order fills (current version assumes fill at target/stop price)
+- [ ] **VPS deployment:** Hetzner or Vultr near Kraken (Frankfurt/London)
+- [ ] **Fill confirmation:** Poll Kraken `/0/private/QueryOrders` to verify limit fills (current version assumes fill at price)
+- [ ] **L2 delta handling:** Feed worker should apply book deltas after snapshot instead of overwriting
 
 ---
 
 ## Known Limitations
 1. OMS assumes fills happen at target/stop price — real fills may differ (slippage)
-2. The Processor worker pool initializes immediately on import — if calcWorker.js doesn't exist at startup, it will throw. Build first: `npm run build`
-3. Kraken WebSocket v2 `book` channel sends delta updates after the initial snapshot — the feed worker currently overwrites rather than applying deltas properly for deeper levels
+2. Backtester estimates OBI from candle data (close vs VWAP proxy). Live OBI uses real L2 book
+3. Processor worker pool fails if `calcWorker.js` doesn't exist — run `npm run build` first
 
 ---
 
-*Handover v2.0 — Ready for backtesting and ML filter implementation*
+*Handover v3.0 — MessagePort fixed, backtester built, ready for tuning and ML filter*
