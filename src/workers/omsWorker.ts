@@ -69,8 +69,8 @@ function calcPositionSize(price: number, atr: number): number {
   const stopDistanceUsd = price * atr * stopAtrMult / price; // = atr * stopAtrMult (in USD per BTC)
   if (stopDistanceUsd <= 0) return 0.001; // safe fallback
   const rawSize = (_currentBalance * riskPerTrade) / stopDistanceUsd;
-  // Clamp: minimum 0.001 BTC, maximum 0.1 BTC (never over-leverage on small account)
-  return Math.max(0.001, Math.min(0.1, parseFloat(rawSize.toFixed(4))));
+  // Clamp removed for altcoins/memecoins. Rely purely on account risk %.
+  return parseFloat(rawSize.toFixed(8));
 }
 
 // ── Kraken REST signing ───────────────────────────────────────────────────────

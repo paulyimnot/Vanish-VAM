@@ -1,7 +1,7 @@
 # VANISH — VAM Bot
-## AI-to-AI Handover Document v3.0
+## AI-to-AI Handover Document v4.0
 **Strategy:** Velocity Asymmetric Momentum (VAM)  
-**Exchange:** Kraken BTC/USDT (fully US-legal)  
+**Exchange:** Kraken BTC/USDT + Meme Coins (DOGE, PEPE, WIF, SOL, etc.)  
 **Author:** Antigravity (Google DeepMind)  
 **Repo:** https://github.com/paulyimnot/Vanish-VAM
 
@@ -16,6 +16,12 @@ cp .env.example .env      # fill in KRAKEN_API_KEY and KRAKEN_API_SECRET
 npm run backtest          # run 6-month backtest — no API key needed!
 npm run dev               # DRY_RUN=true by default — safe to run immediately
 ```
+
+### Dashboard
+When running `npm run dev`, open `http://localhost:8080` to view the live Web3 Dashboard (P&L, Win Rate, and WebSocket Terminal Stream).
+
+### Auto-Optimizer
+Run `node --loader ts-node/esm src/optimize_all.ts` to brute-force test the top 10 coins. The bot will automatically read the best settings from `presets.json` and overwrite `.env` defaults dynamically at runtime.
 
 ### Backtesting
 
@@ -124,13 +130,14 @@ build.mjs                     esbuild — each worker compiled separately
 ## Completed
 
 - [x] **MessagePort wiring fixed** — OMS now listens on the transferred `omsPort` for engine signals
-- [x] **Backtesting engine** — `npm run backtest` fetches Kraken 5-min OHLCV, runs full sim with trailing stop + compound sizing + real fees, prints Sharpe / drawdown / profit factor
+- [x] **Backtesting engine** — `npm run backtest` fetches Kraken OHLCV, runs full sim with trailing stop + compound sizing + real fees
 - [x] **Trailing stop** — locks in breakeven once 1×ATR in profit, then trails 1×ATR below peak
 - [x] **Compound sizing** — position scales with account balance growth
 - [x] **Fee-aware ATR gate** — engine skips signals when ATR is too small for fees to be covered
-- [x] **Time-of-day filter** — skips 00:00–06:00 UTC (thin volume)
-- [x] **Signal staleness** — OMS rejects signals older than 3 seconds
-- [x] **Circuit breaker** — HEALTHY / WARNING / EMERGENCY_STOP from peak drawdown
+- [x] **Meme Coin Sizing Fix** — Removed the 0.1 hardcoded coin limit so the bot can buy thousands of PEPE/DOGE based strictly on account risk %.
+- [x] **Auto-Optimizer** — Grid search engine (`optimize_all.ts`) brute forces top combinations and saves to `presets.json`.
+- [x] **Auto-Loading Presets** — `main.ts` intercepts `.env` and automatically loads the mathematically proven best setup for the given coin.
+- [x] **Live WebSocket Dashboard** — HTTP/WS server built into `main.ts`. UI served at `localhost:8080` with live terminal streaming.
 
 ## Next Collaborator Tasks
 
@@ -158,4 +165,6 @@ build.mjs                     esbuild — each worker compiled separately
 
 ---
 
-*Handover v3.0 — MessagePort fixed, backtester built, ready for tuning and ML filter*
+---
+
+*Handover v4.0 — Optimizer added, sizing fixed for altcoins, WebSocket dashboard live. Ready for ML filtering layer.*

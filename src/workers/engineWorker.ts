@@ -50,9 +50,11 @@ let _prevMid = 0;
 let _atrCount = 0;
 const _trBuffer: number[] = new Array(atrPeriod).fill(0) as number[];
 
-// ── VWAP state ────────────────────────────────────────────────────────────────
-let _vwapPV = 0;
-let _vwapV  = 0;
+// ── VWAP state (rolling window, not cumulative) ────────────────────────────────
+const VWAP_WINDOW = 200;
+const _vwapMids: number[] = new Array(VWAP_WINDOW).fill(0);
+const _vwapVols: number[] = new Array(VWAP_WINDOW).fill(0);
+let   _vwapIdx = 0;
 
 // ── Volume ring buffer for spike detection ────────────────────────────────────
 const VOL_WINDOW = 20;
@@ -60,9 +62,10 @@ const _volBuffer: number[] = new Array(VOL_WINDOW).fill(0) as number[];
 let _volIdx = 0;
 let _volSum = 0;
 
-// ── Signal cooldown ───────────────────────────────────────────────────────────
-let _lastSignalTs = 0;
-const SIGNAL_COOLDOWN_MS = 30_000; // 30s between signals (reduced from 60s)
+// ── Signal cooldown (per side) ───────────────────────────────────────────────
+let _lastLongTs  = 0;
+let _lastShortTs = 0;
+const SIGNAL_COOLDOWN_MS = 30_000;
 
 // ── Tick budget ───────────────────────────────────────────────────────────────
 let _lastTick = 0;
@@ -92,10 +95,11 @@ function computeOBI(): number {
   return total > 0 ? bidVol / total : 0.5;
 }
 
-function updateATR(mid: number, volume: number): void {
+function updateATR(mid: number, volume: number, high: number, low: number): void {
   if (_prevMid === 0) { _prevMid = mid; return; }
 
-  const tr = Math.abs(mid - _prevMid);
+  // True Range = max of: current bar H-L, |H - prevClose|, |L - prevClose|
+  const tr = Math.max(high - low, Math.abs(high - _prevMid), Math.abs(low - _prevMid));
   _prevMid = mid;
 
   if (_atrCount < atrPeriod) {
@@ -108,8 +112,10 @@ function updateATR(mid: number, volume: number): void {
     _atr = (_atr * (atrPeriod - 1) + tr) / atrPeriod;
   }
 
-  _vwapPV += mid * volume;
-  _vwapV  += volume;
+  // Rolling VWAP — overwrite oldest slot
+  _vwapMids[_vwapIdx] = mid;
+  _vwapVols[_vwapIdx] = volume;
+  _vwapIdx = (_vwapIdx + 1) % VWAP_WINDOW;
 
   _volSum -= _volBuffer[_volIdx];
   _volBuffer[_volIdx] = volume;
@@ -130,12 +136,21 @@ function evaluate(): void {
   if (bid === 0 || ask === 0) return;
 
   const mid    = (bid + ask) / 2;
+  // Approximate H/L for true range using bid/ask spread
+  const high   = ask;
+  const low    = bid;
   const volume = bidQty + askQty;
 
-  updateATR(mid, volume);
+  updateATR(mid, volume, high, low);
   if (_atr === 0) return;
 
-  const vwap   = _vwapV > 0 ? _vwapPV / _vwapV : mid;
+  // Rolling VWAP from ring buffer
+  let pvSum = 0, vSum = 0;
+  for (let i = 0; i < VWAP_WINDOW; i++) {
+    pvSum += _vwapMids[i] * _vwapVols[i];
+    vSum  += _vwapVols[i];
+  }
+  const vwap = vSum > 0 ? pvSum / vSum : mid;
   const obi    = computeOBI();
   const atrPct = _atr / mid;
 
@@ -149,8 +164,9 @@ function evaluate(): void {
   // Regime gate
   if (atrPct < dormantThreshold) return;
 
-  // Time-of-day filter
-  if (!isTradingHour()) return;
+  // Time-of-day filter — use feed clock (safer than server clock on VPS)
+  const feedHour = new Date(now).getUTCHours();
+  if (feedHour < 6) return;
 
   // Fee-aware check — log if ATR is below fee breakeven
   const minAtr = breakevenAtr(mid);
@@ -166,8 +182,9 @@ function evaluate(): void {
     return;
   }
 
-  // Signal cooldown
-  if (now - _lastSignalTs < SIGNAL_COOLDOWN_MS) return;
+  // Signal cooldown — per side so opposite direction can fire immediately
+  const longReady  = (now - _lastLongTs)  >= SIGNAL_COOLDOWN_MS;
+  const shortReady = (now - _lastShortTs) >= SIGNAL_COOLDOWN_MS;
 
   // Volume spike check
   const avgVol = _volSum / VOL_WINDOW;
@@ -176,8 +193,8 @@ function evaluate(): void {
   // VWAP breakout + OBI
   const distFromVwap = (mid - vwap) / vwap;
 
-  if (distFromVwap > vwapBreakMin && obi > obiLongThreshold) {
-    _lastSignalTs = now;
+  if (distFromVwap > vwapBreakMin && obi > obiLongThreshold && longReady) {
+    _lastLongTs = now;
     Atomics.store(data, SIGNAL,       1);
     Atomics.store(data, SIGNAL_PRICE, mid);
     Atomics.store(data, SIGNAL_ATR,   _atr);
@@ -189,11 +206,11 @@ function evaluate(): void {
     });
     parentPort?.postMessage({
       type: 'signal',
-      msg: `LONG @ ${mid.toFixed(2)} | ATR: $${_atr.toFixed(2)} (BE: $${minAtr.toFixed(2)}) | OBI: ${obi.toFixed(3)}`,
+      msg: `LONG @ ${mid.toFixed(2)} | ATR: $${_atr.toFixed(4)} (BE: $${minAtr.toFixed(4)}) | OBI: ${obi.toFixed(3)} | VWAP+${(distFromVwap*100).toFixed(3)}%`,
     });
 
-  } else if (distFromVwap < -vwapBreakMin && obi < obiShortThreshold) {
-    _lastSignalTs = now;
+  } else if (distFromVwap < -vwapBreakMin && obi < obiShortThreshold && shortReady) {
+    _lastShortTs = now;
     Atomics.store(data, SIGNAL,       -1);
     Atomics.store(data, SIGNAL_PRICE, mid);
     Atomics.store(data, SIGNAL_ATR,   _atr);
@@ -205,7 +222,7 @@ function evaluate(): void {
     });
     parentPort?.postMessage({
       type: 'signal',
-      msg: `SHORT @ ${mid.toFixed(2)} | ATR: $${_atr.toFixed(2)} (BE: $${minAtr.toFixed(2)}) | OBI: ${obi.toFixed(3)}`,
+      msg: `SHORT @ ${mid.toFixed(2)} | ATR: $${_atr.toFixed(4)} (BE: $${minAtr.toFixed(4)}) | OBI: ${obi.toFixed(3)} | VWAP${(distFromVwap*100).toFixed(3)}%`,
     });
   }
 }

@@ -10,7 +10,7 @@
 
 import { workerData, parentPort } from 'worker_threads';
 import WebSocket from 'ws';
-import Atomics from 'atomics'; // Node built-in
+// Atomics is a Node.js global — no import needed
 import {
   BID_PRICE, BID_QTY, ASK_PRICE, ASK_QTY, TIMESTAMP,
   BID_PRICES_START, BID_QTYS_START, ASK_PRICES_START, ASK_QTYS_START,

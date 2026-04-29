@@ -29,6 +29,8 @@ const VWAP_BREAK      = parseFloat(e['VWAP_BREAK_MIN']      ?? '0.0015');
 const STOP_MULT       = parseFloat(e['STOP_ATR_MULT']       ?? '0.5');
 const TARGET_MULT     = parseFloat(e['TARGET_ATR_MULT']      ?? '1.5');
 const MAX_DAILY_LOSS  = parseFloat(e['MAX_DAILY_LOSS']       ?? '0.03');
+const SLIPPAGE_PCT    = parseFloat(e['SLIPPAGE_PCT']         ?? '0.0005'); // 0.05% per side
+const MAX_HOLD_MS     = 24 * 60 * 60_000; // force-close after 24 hours
 
 const DAYS = parseInt(process.argv.find((_, i, a) => a[i - 1] === '--days') ?? '180', 10);
 const CSV_OUT = process.argv.find((_, i, a) => a[i - 1] === '--csv') ?? '';
@@ -230,7 +232,11 @@ function runBacktest(candles: Candle[]): Trade[] {
       const hitStop   = position === 'long' ? checkPrice <= stopPrice  : checkPrice >= stopPrice;
 
       if (hitTarget || hitStop) {
-        const exitPrice = hitTarget ? targetPrice : stopPrice;
+        // Apply exit slippage
+        const rawExit = hitTarget ? targetPrice : stopPrice;
+        const exitPrice = position === 'long'
+          ? rawExit * (1 - SLIPPAGE_PCT)  // long exit: we get slightly less
+          : rawExit * (1 + SLIPPAGE_PCT); // short exit: we pay slightly more
         const rawPnl = position === 'long'
           ? (exitPrice - entryPrice) * tradeQty
           : (entryPrice - exitPrice) * tradeQty;
@@ -253,10 +259,25 @@ function runBacktest(candles: Candle[]): Trade[] {
         balance += netPnl;
         dailyPnl += netPnl;
         position = 'flat';
-        cooldownUntil = c.time + 5 * 60_000; // 5-min cooldown after exit
+        cooldownUntil = c.time + 5 * 60_000;
 
         if (dailyPnl / ACCOUNT_BALANCE <= -MAX_DAILY_LOSS) halted = true;
         continue;
+      }
+
+      // ── Max hold-time: force close after 24 hours ──────────────────────────
+      if (c.time - entryTime > MAX_HOLD_MS) {
+        const exitPrice = mid * (position === 'long' ? (1 - SLIPPAGE_PCT) : (1 + SLIPPAGE_PCT));
+        const rawPnl = position === 'long'
+          ? (exitPrice - entryPrice) * tradeQty
+          : (entryPrice - exitPrice) * tradeQty;
+        const fees = (exitPrice * tradeQty * MAKER_FEE) + (entryPrice * tradeQty * MAKER_FEE);
+        const netPnl = rawPnl - fees;
+        trades.push({ entryTime, exitTime: c.time, side: position, entryPrice, exitPrice, qty: tradeQty, grossPnl: rawPnl, fees, netPnl, exitReason: 'stop' });
+        balance += netPnl; dailyPnl += netPnl;
+        position = 'flat';
+        cooldownUntil = c.time + 5 * 60_000;
+        if (dailyPnl / ACCOUNT_BALANCE <= -MAX_DAILY_LOSS) halted = true;
       }
     }
 
@@ -292,13 +313,14 @@ function runBacktest(candles: Candle[]): Trade[] {
 
     // ── Open position ──────────────────────────────────────────────────────
     const stopDist = atr * STOP_MULT;
-    const qty = Math.max(0.001, Math.min(0.1, (balance * RISK_PER_TRADE) / stopDist));
+    const qty = (balance * RISK_PER_TRADE) / stopDist;
 
     position    = signal;
-    entryPrice  = mid;
+    // Apply entry slippage
+    entryPrice  = mid * (signal === 'long' ? (1 + SLIPPAGE_PCT) : (1 - SLIPPAGE_PCT));
     entryTime   = c.time;
     tradeAtr    = atr;
-    tradeQty    = parseFloat(qty.toFixed(4));
+    tradeQty    = parseFloat(qty.toFixed(8)); // 8 decimals — correct for meme coins
     trailingActive = false;
     peakPrice   = mid;
 

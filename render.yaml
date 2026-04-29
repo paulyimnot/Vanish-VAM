@@ -1,0 +1,50 @@
+services:
+  - type: web
+    name: vanish-vam-bot
+    env: node
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DRY_RUN
+        value: "true"
+      - key: SYMBOL
+        value: PEPEUSD
+      - key: ACCOUNT_BALANCE
+        value: "5000"
+      - key: RISK_PER_TRADE
+        value: "0.01"
+      - key: MAKER_FEE
+        value: "0.0016"
+      - key: ATR_PERIOD
+        value: "14"
+      - key: STOP_ATR_MULT
+        value: "0.5"
+      - key: TARGET_ATR_MULT
+        value: "2.0"
+      - key: VOLUME_SPIKE_MULTIPLIER
+        value: "3.0"
+      - key: VWAP_BREAK_MIN
+        value: "0.005"
+      - key: OBI_LONG_THRESHOLD
+        value: "0.60"
+      - key: OBI_SHORT_THRESHOLD
+        value: "0.40"
+      - key: ATR_DORMANT_THRESHOLD
+        value: "0.003"
+      - key: ATR_VOLATILE_THRESHOLD
+        value: "0.02"
+      - key: MAX_DAILY_LOSS
+        value: "0.03"
+      - key: MAX_DRAWDOWN_USD
+        value: "500"
+      - key: SLIPPAGE_PCT
+        value: "0.0005"
+      # ── Set these in Render Dashboard → Environment (never commit real keys!) ──
+      - key: KRAKEN_API_KEY
+        sync: false
+      - key: KRAKEN_API_SECRET
+        sync: false

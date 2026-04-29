@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VANISH VAM | Bot Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0a0a0f;
+            --panel-bg: rgba(20, 20, 30, 0.6);
+            --accent-green: #00ff88;
+            --accent-red: #ff3366;
+            --accent-blue: #00d2ff;
+            --text-main: #ffffff;
+            --text-muted: #8b8b9e;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            background: radial-gradient(circle at 50% 0%, #1a1a2e 0%, var(--bg-dark) 60%);
+            display: flex;
+            flex-direction: column;
+            padding: 2rem;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .title-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo-ring {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 3px solid transparent;
+            border-top-color: var(--accent-blue);
+            border-right-color: var(--accent-blue);
+            animation: spin 2s linear infinite;
+        }
+
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        h1 { font-size: 2rem; font-weight: 800; letter-spacing: -1px; }
+        .badge {
+            background: rgba(0, 210, 255, 0.1);
+            color: var(--accent-blue);
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            border: 1px solid rgba(0, 210, 255, 0.2);
+            text-transform: uppercase;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card {
+            background: var(--panel-bg);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 1.5rem;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .card-label {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.5rem;
+        }
+
+        .card-value {
+            font-size: 2rem;
+            font-weight: 800;
+        }
+
+        .positive { color: var(--accent-green); }
+        .negative { color: var(--accent-red); }
+
+        .terminal-container {
+            background: #050508;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .terminal-header {
+            background: rgba(255,255,255,0.02);
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .dot { width: 10px; height: 10px; border-radius: 50%; }
+        .dot.red { background: #ff5f56; }
+        .dot.yellow { background: #ffbd2e; }
+        .dot.green { background: #27c93f; }
+
+        .terminal-body {
+            padding: 1rem 1.5rem;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9rem;
+            color: #a0a0b0;
+            line-height: 1.5;
+            height: 400px;
+        }
+
+        .log-row { margin-bottom: 4px; display: flex; gap: 10px; }
+        .log-time { color: #505060; min-width: 80px; }
+        
+        .log-tag.feed { color: #8b8b9e; }
+        .log-tag.engine { color: #00d2ff; }
+        .log-tag.signal { color: #ff3366; font-weight: bold; }
+        .log-tag.oms { color: #00ff88; }
+        .log-tag.fill { color: #00ff88; font-weight: bold; }
+        .log-tag.halt { color: #ff3366; font-weight: bold; background: rgba(255,51,102,0.1); padding: 0 4px; border-radius: 4px;}
+
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="title-wrapper">
+            <div class="logo-ring"></div>
+            <h1>VANISH <span style="font-weight: 400; color: var(--text-muted);">VAM</span></h1>
+            <span class="badge" id="bot-mode">Connecting...</span>
+        </div>
+        <div class="title-wrapper">
+            <span class="badge" id="bot-symbol">--</span>
+            <span style="color: var(--text-muted); font-size: 0.9rem;" id="connection-status">🔴 Offline</span>
+        </div>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <div class="card-label">Current Balance</div>
+            <div class="card-value" id="val-balance">$0.00</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Net Profit</div>
+            <div class="card-value" id="val-pnl">$0.00</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Win Rate</div>
+            <div class="card-value" id="val-winrate">0.0%</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Trades Taken</div>
+            <div class="card-value" id="val-trades">0</div>
+        </div>
+    </div>
+
+    <div class="terminal-container">
+        <div class="terminal-header">
+            <div class="dot red"></div>
+            <div class="dot yellow"></div>
+            <div class="dot green"></div>
+            <span style="margin-left: 10px; color: var(--text-muted); font-size: 0.85rem; font-weight: 600;">LIVE EXECUTION STREAM</span>
+        </div>
+        <div class="terminal-body" id="terminal">
+            <div class="log-row" style="color: var(--accent-blue)">Awaiting connection to local bot engine...</div>
+        </div>
+    </div>
+
+    <script>
+        const terminal = document.getElementById('terminal');
+        let ws;
+
+        function connect() {
+            ws = new WebSocket(`ws://${window.location.host}`);
+            
+            ws.onopen = () => {
+                document.getElementById('connection-status').innerHTML = '🟢 Live';
+                document.getElementById('connection-status').style.color = 'var(--accent-green)';
+            };
+
+            ws.onclose = () => {
+                document.getElementById('connection-status').innerHTML = '🔴 Offline';
+                document.getElementById('connection-status').style.color = 'var(--text-muted)';
+                setTimeout(connect, 2000);
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'init') {
+                        document.getElementById('bot-mode').innerText = data.dryRun ? 'DRY RUN' : 'LIVE TRADING';
+                        document.getElementById('bot-symbol').innerText = data.symbol;
+                        document.getElementById('val-balance').innerText = '$' + data.balance.toFixed(2);
+                        if (!data.dryRun) document.getElementById('bot-mode').style.color = 'var(--accent-red)';
+                    }
+                    else if (data.type === 'stats') {
+                        document.getElementById('val-balance').innerText = '$' + data.balance.toFixed(2);
+                        const pnlEl = document.getElementById('val-pnl');
+                        pnlEl.innerText = (data.pnl >= 0 ? '+' : '') + '$' + data.pnl.toFixed(2);
+                        pnlEl.className = 'card-value ' + (data.pnl >= 0 ? 'positive' : 'negative');
+                        
+                        document.getElementById('val-trades').innerText = (data.wins + data.losses).toString();
+                        const wr = (data.wins + data.losses > 0) ? ((data.wins / (data.wins + data.losses)) * 100).toFixed(1) : '0.0';
+                        document.getElementById('val-winrate').innerText = wr + '%';
+                    }
+                    else if (data.type === 'log') {
+                        const row = document.createElement('div');
+                        row.className = 'log-row';
+                        const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+                        
+                        // Parse tags
+                        let tagClass = 'oms';
+                        let content = data.msg;
+                        if (content.includes('[FEED]')) tagClass = 'feed';
+                        else if (content.includes('[ENGINE]')) tagClass = 'engine';
+                        else if (content.includes('[SIGNAL]')) tagClass = 'signal';
+                        else if (content.includes('[FILL]')) tagClass = 'fill';
+                        else if (content.includes('[HALT]')) tagClass = 'halt';
+
+                        row.innerHTML = `<span class="log-time">${time}</span><span class="log-tag ${tagClass}">${content}</span>`;
+                        terminal.appendChild(row);
+
+                        // Keep max 200 lines
+                        if (terminal.childElementCount > 200) {
+                            terminal.removeChild(terminal.firstChild);
+                        }
+                        
+                        // Auto-scroll
+                        terminal.scrollTop = terminal.scrollHeight;
+                    }
+                } catch (e) {
+                    console.error("Failed to parse websocket msg", e);
+                }
+            };
+        }
+
+        connect();
+    </script>
+</body>
+</html>

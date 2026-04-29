@@ -8,11 +8,19 @@
  */
 
 import 'dotenv/config';
+import fs from 'fs';
+import http from 'http';
+import { WebSocketServer } from 'ws';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { Worker, MessageChannel, isMainThread } from 'worker_threads';
 import { BUFFER_BYTES } from './shared/sharedBuffer.js';
 import { startJitterGuard } from './shared/jitterGuard.js';
 
 if (!isMainThread) throw new Error('main.ts must run on main thread');
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const e = process.env;
@@ -22,22 +30,35 @@ const stopAtrMult  = parseFloat(e['STOP_ATR_MULT']  ?? '0.5');
 const targetAtrMult = parseFloat(e['TARGET_ATR_MULT'] ?? '1.5');
 const accountBalance = parseFloat(e['ACCOUNT_BALANCE'] ?? '5000');
 
+const symbol = e['SYMBOL'] ?? 'BTC/USDT';
+
+// ── Auto-load Presets ────────────────────────────────────────────────────────
+let p: Record<string, number> = {};
+try {
+  const presets = JSON.parse(fs.readFileSync(new URL('../presets.json', import.meta.url), 'utf8'));
+  const presetKey = symbol.replace('/', '');
+  if (presets[presetKey]) {
+    p = presets[presetKey].settings;
+    console.log(`\n[VANISH] ⚡ Auto-loaded optimized preset for ${symbol}\n`);
+  }
+} catch (err) { /* ignore if no preset file */ }
+
 const cfg = {
   apiKey:                e['KRAKEN_API_KEY']          ?? '',
   apiSecret:             e['KRAKEN_API_SECRET']        ?? '',
-  symbol:                e['SYMBOL']                   ?? 'BTC/USDT',
+  symbol:                symbol,
   accountBalance,
   riskPerTrade,
   makerFee,
-  stopAtrMult,
-  targetAtrMult,
+  stopAtrMult:           p['STOP_ATR_MULT'] ?? stopAtrMult,
+  targetAtrMult:         p['TARGET_ATR_MULT'] ?? targetAtrMult,
   atrPeriod:             parseInt(e['ATR_PERIOD']              ?? '14', 10),
-  dormantThreshold:      parseFloat(e['ATR_DORMANT_THRESHOLD'] ?? '0.003'),
+  dormantThreshold:      p['ATR_DORMANT_THRESHOLD'] ?? parseFloat(e['ATR_DORMANT_THRESHOLD'] ?? '0.003'),
   volatileThreshold:     parseFloat(e['ATR_VOLATILE_THRESHOLD'] ?? '0.02'),
-  volumeSpikeMultiplier: parseFloat(e['VOLUME_SPIKE_MULTIPLIER'] ?? '2.0'),
+  volumeSpikeMultiplier: p['VOLUME_SPIKE_MULTIPLIER'] ?? parseFloat(e['VOLUME_SPIKE_MULTIPLIER'] ?? '2.0'),
   obiLongThreshold:      parseFloat(e['OBI_LONG_THRESHOLD']    ?? '0.60'),
   obiShortThreshold:     parseFloat(e['OBI_SHORT_THRESHOLD']   ?? '0.40'),
-  vwapBreakMin:          parseFloat(e['VWAP_BREAK_MIN']        ?? '0.0015'),
+  vwapBreakMin:          p['VWAP_BREAK_MIN'] ?? parseFloat(e['VWAP_BREAK_MIN']        ?? '0.0015'),
   maxDailyLossRate:      parseFloat(e['MAX_DAILY_LOSS']        ?? '0.03'),
   maxDrawdownUsd:        parseFloat(e['MAX_DRAWDOWN_USD']      ?? '500'),
   dryRun:                e['DRY_RUN'] !== 'false',
@@ -63,6 +84,37 @@ console.log(`  DryRun:         ${cfg.dryRun}`);
 console.log(`  Trading hours:  06:00–24:00 UTC (skips thin overnight session)`);
 console.log('='.repeat(60));
 
+// ── Dashboard Server (HTTP + WS) ──────────────────────────────────────────────
+let stats = { pnl: 0, wins: 0, losses: 0, balance: accountBalance };
+
+const server = http.createServer((req, res) => {
+  if (req.url === '/') {
+    fs.readFile(join(__dirname, '../public/index.html'), (err, data) => {
+      if (err) { res.writeHead(500); res.end('Error loading index.html'); }
+      else { res.writeHead(200, {'Content-Type': 'text/html'}); res.end(data); }
+    });
+  } else {
+    res.writeHead(404); res.end();
+  }
+});
+
+const wss = new WebSocketServer({ server });
+wss.on('connection', (ws) => {
+  ws.send(JSON.stringify({ type: 'init', dryRun: cfg.dryRun, symbol: cfg.symbol, balance: accountBalance }));
+  ws.send(JSON.stringify({ type: 'stats', ...stats }));
+});
+
+const DASHBOARD_PORT = parseInt(process.env['PORT'] ?? '8080', 10);
+server.listen(DASHBOARD_PORT, () => {
+  console.log(`\n[DASHBOARD] 🌐 Live at http://localhost:${DASHBOARD_PORT}\n`);
+});
+
+function broadcastLog(msg: string) {
+  wss.clients.forEach(client => {
+    if (client.readyState === 1) client.send(JSON.stringify({ type: 'log', msg }));
+  });
+}
+
 // ── Shared memory ─────────────────────────────────────────────────────────────
 const sharedBuffer = new SharedArrayBuffer(BUFFER_BYTES);
 
@@ -74,7 +126,10 @@ const feedWorker = new Worker(
   new URL('./workers/feedWorker.js', import.meta.url),
   { workerData: { sharedBuffer, symbol: cfg.symbol } }
 );
-feedWorker.on('message', (m: { msg: string }) => console.log(`[FEED]   ${m.msg}`));
+feedWorker.on('message', (m: { msg: string }) => {
+  const s = `[FEED]   ${m.msg}`;
+  console.log(s); broadcastLog(s);
+});
 feedWorker.on('error',   (err: Error)          => console.error('[FEED ERROR]', err.message));
 
 // ── Thread B: Engine ──────────────────────────────────────────────────────────
@@ -87,7 +142,8 @@ const engineWorker = new Worker(
 );
 engineWorker.on('message', (m: { type: string; msg: string }) => {
   const prefix = m.type === 'signal' ? '[SIGNAL]' : '[ENGINE]';
-  console.log(`${prefix} ${m.msg}`);
+  const s = `${prefix} ${m.msg}`;
+  console.log(s); broadcastLog(s);
 });
 engineWorker.on('error', (err: Error) => console.error('[ENGINE ERROR]', err.message));
 
@@ -111,9 +167,18 @@ const omsWorker = new Worker(
     transferList: [omsPort],
   }
 );
-omsWorker.on('message', (m: { type: string; msg: string }) => {
+omsWorker.on('message', (m: { type: string; msg: string; pnl?: number; totalPnl?: number; wins?: number; losses?: number; balance?: number }) => {
   const labels: Record<string, string> = { fill: '[FILL] ', halt: '[HALT] ', warning: '[WARN] ', order: '[ORDER]', status: '[OMS]  ', error: '[ERROR]' };
-  console.log(`${labels[m.type] ?? '[OMS]  '} ${m.msg}`);
+  const s = `${labels[m.type] ?? '[OMS]  '} ${m.msg}`;
+  console.log(s); broadcastLog(s);
+  
+  if (m.type === 'fill' && m.totalPnl !== undefined) {
+    stats = { pnl: m.totalPnl, wins: m.wins || 0, losses: m.losses || 0, balance: m.balance || accountBalance };
+    wss.clients.forEach(client => {
+      if (client.readyState === 1) client.send(JSON.stringify({ type: 'stats', ...stats }));
+    });
+  }
+
   if (m.type === 'halt') {
     void Promise.all([feedWorker.terminate(), engineWorker.terminate(), omsWorker.terminate()])
       .then(() => process.exit(0));

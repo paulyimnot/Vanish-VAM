@@ -1,0 +1,182 @@
+{
+  "PEPEUSD": {
+    "expectedPnl": 132.1165025467855,
+    "winRate": "100.0",
+    "totalTrades": 1,
+    "settings": {
+      "STOP_ATR_MULT": 0.5,
+      "TARGET_ATR_MULT": 2,
+      "VOLUME_SPIKE_MULTIPLIER": 3,
+      "VWAP_BREAK_MIN": 0.005,
+      "ATR_DORMANT_THRESHOLD": 0.003
+    }
+  },
+  "XDGUSD": {
+    "expectedPnl": 52.55223418552745,
+    "winRate": "33.3",
+    "totalTrades": 3,
+    "settings": {
+      "STOP_ATR_MULT": 1,
+      "TARGET_ATR_MULT": 2,
+      "VOLUME_SPIKE_MULTIPLIER": 3,
+      "VWAP_BREAK_MIN": 0.0015,
+      "ATR_DORMANT_THRESHOLD": 0.005
+    }
+  },
+  "SHIBUSD": {
+    "expectedPnl": 11.729812928153734,
+    "winRate": "50.0",
+    "totalTrades": 2,
+    "settings": {
+      "STOP_ATR_MULT": 0.5,
+      "TARGET_ATR_MULT": 1.5,
+      "VOLUME_SPIKE_MULTIPLIER": 3,
+      "VWAP_BREAK_MIN": 0.0015,
+      "ATR_DORMANT_THRESHOLD": 0.003
+    }
+  },
+  "WIFUSD": {
+    "expectedPnl": 201.27996246111246,
+    "winRate": "100.0",
+    "totalTrades": 1,
+    "settings": {
+      "STOP_ATR_MULT": 0.5,
+      "TARGET_ATR_MULT": 3,
+      "VOLUME_SPIKE_MULTIPLIER": 2,
+      "VWAP_BREAK_MIN": 0.0015,
+      "ATR_DORMANT_THRESHOLD": 0.003
+    }
+  },
+  "BONKUSD": {
+    "expectedPnl": -15.327858921472297,
+    "winRate": "0.0",
+    "totalTrades": 1,
+    "settings": {
+      "STOP_ATR_MULT": 2,
+      "TARGET_ATR_MULT": 1.5,
+      "VOLUME_SPIKE_MULTIPLIER": 3,
+      "VWAP_BREAK_MIN": 0.0015,
+      "ATR_DORMANT_THRESHOLD": 0.003
+    }
+  },
+  "FLOKIUSD": {
+    "expectedPnl": 68.49434074817177,
+    "winRate": "66.7",
+    "totalTrades": 3,
+    "settings": {
+      "STOP_ATR_MULT": 0.5,
+      "TARGET_ATR_MULT": 2,
+      "VOLUME_SPIKE_MULTIPLIER": 2,
+      "VWAP_BREAK_MIN": 0.0015,
+      "ATR_DORMANT_THRESHOLD": 0.003
+    }
+  },
+  "XBTUSD": {
+    "expectedPnl": 67.58564154944733,
+    "winRate": "100.0",
+    "totalTrades": 1,
+    "settings": {
+      "STOP_ATR_MULT": 0.5,
+      "TARGET_ATR_MULT": 2,
+      "VOLUME_SPIKE_MULTIPLIER": 2,
+      "VWAP_BREAK_MIN": 0.0015,
+      "ATR_DORMANT_THRESHOLD": 0.001
+    }
+  },
+  "ETHUSD": {
+    "expectedPnl": -20.26098175647301,
+    "winRate": "0.0",
+    "totalTrades": 1,
+    "settings": {
+      "STOP_ATR_MULT": 2,
+      "TARGET_ATR_MULT": 1.5,
+      "VOLUME_SPIKE_MULTIPLIER": 3,
+      "VWAP_BREAK_MIN": 0.0015,
+      "ATR_DORMANT_THRESHOLD": 0.003
+    }
+  },
+  "SOLUSD": {
+    "expectedPnl": 193.93337934257997,
+    "winRate": "100.0",
+    "totalTrades": 1,
+    "settings": {
+      "STOP_ATR_MULT": 0.5,
+      "TARGET_ATR_MULT": 3,
+      "VOLUME_SPIKE_MULTIPLIER": 2,
+      "VWAP_BREAK_MIN": 0.0015,
+      "ATR_DORMANT_THRESHOLD": 0.003
+    }
+  },
+  "XRPUSD": {
+    "expectedPnl": 25.91011025382194,
+    "winRate": "100.0",
+    "totalTrades": 1,
+    "settings": {
+      "STOP_ATR_MULT": 0.5,
+      "TARGET_ATR_MULT": 1.5,
+      "VOLUME_SPIKE_MULTIPLIER": 2,
+      "VWAP_BREAK_MIN": 0.0015,
+      "ATR_DORMANT_THRESHOLD": 0.001
+    }
+  },
+  "ADAUSD": {
+    "expectedPnl": -41.59539461879238,
+    "winRate": "0.0",
+    "totalTrades": 1,
+    "settings": {
+      "STOP_ATR_MULT": 2,
+      "TARGET_ATR_MULT": 2,
+      "VOLUME_SPIKE_MULTIPLIER": 3,
+      "VWAP_BREAK_MIN": 0.005,
+      "ATR_DORMANT_THRESHOLD": 0.001
+    }
+  },
+  "AVAXUSD": {
+    "expectedPnl": -24.556989147235765,
+    "winRate": "0.0",
+    "totalTrades": 1,
+    "settings": {
+      "STOP_ATR_MULT": 2,
+      "TARGET_ATR_MULT": 1.5,
+      "VOLUME_SPIKE_MULTIPLIER": 3,
+      "VWAP_BREAK_MIN": 0.0015,
+      "ATR_DORMANT_THRESHOLD": 0.001
+    }
+  },
+  "LINKUSD": {
+    "expectedPnl": 81.29767331047339,
+    "winRate": "100.0",
+    "totalTrades": 1,
+    "settings": {
+      "STOP_ATR_MULT": 0.5,
+      "TARGET_ATR_MULT": 2,
+      "VOLUME_SPIKE_MULTIPLIER": 2,
+      "VWAP_BREAK_MIN": 0.003,
+      "ATR_DORMANT_THRESHOLD": 0.001
+    }
+  },
+  "DOTUSD": {
+    "expectedPnl": -71.08773023069052,
+    "winRate": "50.0",
+    "totalTrades": 2,
+    "settings": {
+      "STOP_ATR_MULT": 2,
+      "TARGET_ATR_MULT": 1.5,
+      "VOLUME_SPIKE_MULTIPLIER": 2,
+      "VWAP_BREAK_MIN": 0.0015,
+      "ATR_DORMANT_THRESHOLD": 0.001
+    }
+  },
+  "LTCUSD": {
+    "expectedPnl": 36.10380584839655,
+    "winRate": "50.0",
+    "totalTrades": 2,
+    "settings": {
+      "STOP_ATR_MULT": 0.5,
+      "TARGET_ATR_MULT": 3,
+      "VOLUME_SPIKE_MULTIPLIER": 3,
+      "VWAP_BREAK_MIN": 0.005,
+      "ATR_DORMANT_THRESHOLD": 0.001
+    }
+  }
+}
