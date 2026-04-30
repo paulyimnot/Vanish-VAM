@@ -41,6 +41,17 @@ function connect(): void {
       method: 'subscribe',
       params: { channel: 'book', symbol: [symbol], depth: DEPTH },
     }));
+
+    // Heartbeat every 30s — keeps connection alive through Render's proxy timeout
+    const heartbeat = setInterval(() => {
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({ method: 'ping' }));
+      } else {
+        clearInterval(heartbeat);
+      }
+    }, 30_000);
+
+    ws.once('close', () => clearInterval(heartbeat));
   });
 
   ws.on('message', (raw: Buffer) => {
