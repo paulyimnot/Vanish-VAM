@@ -201,7 +201,8 @@
         let ws;
 
         function connect() {
-            ws = new WebSocket(`ws://${window.location.host}`);
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}`);
             
             ws.onopen = () => {
                 document.getElementById('connection-status').innerHTML = '🟢 Live';
