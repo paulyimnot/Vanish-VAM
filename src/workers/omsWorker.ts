@@ -85,9 +85,7 @@ function calcPositionSize(price: number, atr: number): number {
   const stopDistanceUsd = atr * stopAtrMult;
   if (stopDistanceUsd <= 0) return 0.001;
   const rawSize = (_currentBalance * riskPerTrade) / stopDistanceUsd;
-  // Cap at 20% of balance to prevent over-exposure on meme coins
-  const maxSize = (_currentBalance * 0.20) / price;
-  return parseFloat(Math.min(rawSize, maxSize).toFixed(8));
+  return parseFloat(rawSize.toFixed(8));
 }
 
 // ── Kraken REST signing ───────────────────────────────────────────────────────
