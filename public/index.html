@@ -141,7 +141,7 @@
     <div class="header">
         <div class="title-wrapper">
             <div class="logo-ring" id="logo-ring"></div>
-            <h1>VANISH <span style="font-weight: 400; color: var(--text-muted);">VAM</span></h1>
+            <h1>VANISH <span id="h1-coin" style="font-weight: 400; color: var(--text-muted);">VAM</span></h1>
             <span class="badge" id="bot-mode">Connecting...</span>
         </div>
         <div class="title-wrapper">
@@ -252,6 +252,9 @@
                     const data = JSON.parse(event.data);
                     
                     if (data.type === 'init') {
+                        const coin = data.symbol.replace('USD','').replace('XBT','BTC').replace('XDG','DOGE');
+                        document.title = `VANISH VAM | ${coin}`;
+                        document.getElementById('h1-coin').innerText = coin;
                         document.getElementById('bot-mode').innerText = data.dryRun ? 'DRY RUN' : 'LIVE TRADING';
                         document.getElementById('bot-symbol').innerText = data.symbol;
                         document.getElementById('val-balance').innerText = '$' + data.balance.toFixed(2);
