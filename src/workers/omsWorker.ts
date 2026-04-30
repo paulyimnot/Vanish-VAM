@@ -168,9 +168,10 @@ async function onSignal(msg: {
   }
 
   const side = msg.signal === 1 ? 'buy' : 'sell';
+  // Aggressive Limit: place order 0.1% past the current price to ensure immediate fill during breakout
   const entryPrice = msg.signal === 1
-    ? msg.price * (1 - 0.0005)
-    : msg.price * (1 + 0.0005);
+    ? msg.price * (1 + 0.001)
+    : msg.price * (1 - 0.001);
 
   // Compound position sizing
   const qty = calcPositionSize(entryPrice, msg.atr);
@@ -213,9 +214,9 @@ async function monitorPosition(): Promise<void> {
       _stopPrice = _entryPrice; // move stop to breakeven
       parentPort?.postMessage({ type: 'status', msg: `Trailing stop activated — stop moved to breakeven ${_stopPrice.toFixed(2)}` });
     }
-    // Keep trailing stop 1×ATR below the peak
+    // Keep trailing stop tighter (0.5×ATR) below the peak once in profit
     if (_trailingActive) {
-      const trailStop = _peakPriceSinceEntry - _tradeAtr;
+      const trailStop = _peakPriceSinceEntry - (_tradeAtr * 0.5);
       if (trailStop > _stopPrice) _stopPrice = trailStop;
     }
   } else {
@@ -227,7 +228,7 @@ async function monitorPosition(): Promise<void> {
       parentPort?.postMessage({ type: 'status', msg: `Trailing stop activated — stop moved to breakeven ${_stopPrice.toFixed(2)}` });
     }
     if (_trailingActive) {
-      const trailStop = _peakPriceSinceEntry + _tradeAtr;
+      const trailStop = _peakPriceSinceEntry + (_tradeAtr * 0.5);
       if (trailStop < _stopPrice) _stopPrice = trailStop;
     }
   }

@@ -51,7 +51,7 @@ let _atrCount = 0;
 const _trBuffer: number[] = new Array(atrPeriod).fill(0) as number[];
 
 // ── VWAP state (rolling window, not cumulative) ────────────────────────────────
-const VWAP_WINDOW = 200;
+const VWAP_WINDOW = 1000;
 const _vwapMids: number[] = new Array(VWAP_WINDOW).fill(0);
 const _vwapVols: number[] = new Array(VWAP_WINDOW).fill(0);
 let   _vwapIdx = 0;
