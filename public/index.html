@@ -235,6 +235,8 @@
                 document.getElementById('connection-status').style.color = 'var(--accent-green)';
                 document.getElementById('btn-start').disabled = botRunning;
                 document.getElementById('btn-stop').disabled  = !botRunning;
+                // Clear the static placeholder on first connect
+                terminal.innerHTML = '';
             };
 
             ws.onclose = () => {
