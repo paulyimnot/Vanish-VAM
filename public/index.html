@@ -12,6 +12,7 @@
             --accent-green: #00ff88;
             --accent-red: #ff3366;
             --accent-blue: #00d2ff;
+            --accent-yellow: #ffbd2e;
             --text-main: #ffffff;
             --text-muted: #8b8b9e;
         }
@@ -35,93 +36,82 @@
             margin-bottom: 2rem;
         }
 
-        .title-wrapper {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
+        .title-wrapper { display: flex; align-items: center; gap: 1rem; }
 
         .logo-ring {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
+            width: 40px; height: 40px; border-radius: 50%;
             border: 3px solid transparent;
             border-top-color: var(--accent-blue);
             border-right-color: var(--accent-blue);
             animation: spin 2s linear infinite;
         }
+        .logo-ring.paused { border-top-color: var(--accent-yellow); border-right-color: var(--accent-yellow); animation-play-state: paused; }
 
         @keyframes spin { 100% { transform: rotate(360deg); } }
 
         h1 { font-size: 2rem; font-weight: 800; letter-spacing: -1px; }
         .badge {
-            background: rgba(0, 210, 255, 0.1);
-            color: var(--accent-blue);
-            padding: 0.3rem 0.8rem;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            border: 1px solid rgba(0, 210, 255, 0.2);
-            text-transform: uppercase;
+            background: rgba(0, 210, 255, 0.1); color: var(--accent-blue);
+            padding: 0.3rem 0.8rem; border-radius: 20px; font-size: 0.8rem;
+            font-weight: 600; border: 1px solid rgba(0, 210, 255, 0.2); text-transform: uppercase;
         }
 
+        /* ── Start / Stop controls ── */
+        .controls { display: flex; gap: 0.75rem; align-items: center; }
+
+        .btn {
+            padding: 0.5rem 1.4rem; border-radius: 10px; font-size: 0.9rem;
+            font-weight: 700; cursor: pointer; border: none; transition: all 0.2s;
+            letter-spacing: 0.5px;
+        }
+        .btn:active { transform: scale(0.96); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        #btn-start {
+            background: linear-gradient(135deg, #00ff88, #00c864);
+            color: #000;
+            box-shadow: 0 4px 15px rgba(0,255,136,0.3);
+        }
+        #btn-start:hover:not(:disabled) { box-shadow: 0 4px 25px rgba(0,255,136,0.5); }
+
+        #btn-stop {
+            background: linear-gradient(135deg, #ff3366, #c41e44);
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(255,51,102,0.3);
+        }
+        #btn-stop:hover:not(:disabled) { box-shadow: 0 4px 25px rgba(255,51,102,0.5); }
+
         .grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 1.5rem;
-            margin-bottom: 1.5rem;
+            display: grid; grid-template-columns: repeat(4, 1fr);
+            gap: 1.5rem; margin-bottom: 1.5rem;
         }
 
         .card {
-            background: var(--panel-bg);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 16px;
-            padding: 1.5rem;
-            transition: transform 0.2s, border-color 0.2s;
+            background: var(--panel-bg); backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 16px; padding: 1.5rem; transition: transform 0.2s, border-color 0.2s;
         }
-
-        .card:hover {
-            transform: translateY(-2px);
-            border-color: rgba(255, 255, 255, 0.1);
-        }
+        .card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.1); }
 
         .card-label {
-            color: var(--text-muted);
-            font-size: 0.85rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 0.5rem;
+            color: var(--text-muted); font-size: 0.85rem; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.5rem;
         }
-
-        .card-value {
-            font-size: 2rem;
-            font-weight: 800;
-        }
+        .card-value { font-size: 2rem; font-weight: 800; }
 
         .positive { color: var(--accent-green); }
         .negative { color: var(--accent-red); }
 
         .terminal-container {
-            background: #050508;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 16px;
-            flex-grow: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            background: #050508; border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 16px; flex-grow: 1; display: flex;
+            flex-direction: column; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
 
         .terminal-header {
-            background: rgba(255,255,255,0.02);
-            padding: 1rem 1.5rem;
+            background: rgba(255,255,255,0.02); padding: 1rem 1.5rem;
             border-bottom: 1px solid rgba(255,255,255,0.05);
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
+            display: flex; align-items: center; gap: 0.5rem;
         }
 
         .dot { width: 10px; height: 10px; border-radius: 50%; }
@@ -130,37 +120,36 @@
         .dot.green { background: #27c93f; }
 
         .terminal-body {
-            padding: 1rem 1.5rem;
-            overflow-y: auto;
+            padding: 1rem 1.5rem; overflow-y: auto;
             font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 0.9rem;
-            color: #a0a0b0;
-            line-height: 1.5;
-            height: 400px;
+            font-size: 0.9rem; color: #a0a0b0; line-height: 1.5; height: 400px;
         }
 
         .log-row { margin-bottom: 4px; display: flex; gap: 10px; }
         .log-time { color: #505060; min-width: 80px; }
-        
-        .log-tag.feed { color: #8b8b9e; }
-        .log-tag.engine { color: #00d2ff; }
-        .log-tag.signal { color: #ff3366; font-weight: bold; }
-        .log-tag.oms { color: #00ff88; }
-        .log-tag.fill { color: #00ff88; font-weight: bold; }
-        .log-tag.halt { color: #ff3366; font-weight: bold; background: rgba(255,51,102,0.1); padding: 0 4px; border-radius: 4px;}
-
+        .log-tag.feed    { color: #8b8b9e; }
+        .log-tag.engine  { color: #00d2ff; }
+        .log-tag.signal  { color: #ff3366; font-weight: bold; }
+        .log-tag.oms     { color: #00ff88; }
+        .log-tag.fill    { color: #00ff88; font-weight: bold; }
+        .log-tag.halt    { color: #ff3366; font-weight: bold; background: rgba(255,51,102,0.1); padding: 0 4px; border-radius: 4px; }
+        .log-tag.paused  { color: var(--accent-yellow); font-weight: bold; }
     </style>
 </head>
 <body>
 
     <div class="header">
         <div class="title-wrapper">
-            <div class="logo-ring"></div>
+            <div class="logo-ring" id="logo-ring"></div>
             <h1>VANISH <span style="font-weight: 400; color: var(--text-muted);">VAM</span></h1>
             <span class="badge" id="bot-mode">Connecting...</span>
         </div>
         <div class="title-wrapper">
             <span class="badge" id="bot-symbol">--</span>
+            <div class="controls">
+                <button class="btn" id="btn-start" onclick="sendCmd('start')" disabled>▶ START</button>
+                <button class="btn" id="btn-stop"  onclick="sendCmd('stop')"  disabled>■ STOP</button>
+            </div>
             <span style="color: var(--text-muted); font-size: 0.9rem;" id="connection-status">🔴 Offline</span>
         </div>
     </div>
@@ -192,13 +181,50 @@
             <span style="margin-left: 10px; color: var(--text-muted); font-size: 0.85rem; font-weight: 600;">LIVE EXECUTION STREAM</span>
         </div>
         <div class="terminal-body" id="terminal">
-            <div class="log-row" style="color: var(--accent-blue)">Awaiting connection to local bot engine...</div>
+            <div class="log-row" style="color: var(--accent-blue)">Awaiting connection to bot engine...</div>
         </div>
     </div>
 
     <script>
         const terminal = document.getElementById('terminal');
         let ws;
+        let botRunning = true;
+
+        function sendCmd(cmd) {
+            if (ws && ws.readyState === 1) {
+                ws.send(JSON.stringify({ cmd }));
+            }
+        }
+
+        function setRunningState(running) {
+            botRunning = running;
+            const logo = document.getElementById('logo-ring');
+            const modeEl = document.getElementById('bot-mode');
+            const startBtn = document.getElementById('btn-start');
+            const stopBtn  = document.getElementById('btn-stop');
+
+            if (running) {
+                logo.classList.remove('paused');
+                startBtn.disabled = true;
+                stopBtn.disabled  = false;
+                addLog('⚡ Bot RESUMED — scanning for signals', 'oms');
+            } else {
+                logo.classList.add('paused');
+                startBtn.disabled = false;
+                stopBtn.disabled  = true;
+                addLog('⏸ Bot PAUSED — no new trades will be opened', 'paused');
+            }
+        }
+
+        function addLog(msg, tagClass = 'oms') {
+            const row = document.createElement('div');
+            row.className = 'log-row';
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+            row.innerHTML = `<span class="log-time">${time}</span><span class="log-tag ${tagClass}">${msg}</span>`;
+            terminal.appendChild(row);
+            if (terminal.childElementCount > 200) terminal.removeChild(terminal.firstChild);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
 
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -207,11 +233,15 @@
             ws.onopen = () => {
                 document.getElementById('connection-status').innerHTML = '🟢 Live';
                 document.getElementById('connection-status').style.color = 'var(--accent-green)';
+                document.getElementById('btn-start').disabled = botRunning;
+                document.getElementById('btn-stop').disabled  = !botRunning;
             };
 
             ws.onclose = () => {
                 document.getElementById('connection-status').innerHTML = '🔴 Offline';
                 document.getElementById('connection-status').style.color = 'var(--text-muted)';
+                document.getElementById('btn-start').disabled = true;
+                document.getElementById('btn-stop').disabled  = true;
                 setTimeout(connect, 2000);
             };
 
@@ -224,44 +254,31 @@
                         document.getElementById('bot-symbol').innerText = data.symbol;
                         document.getElementById('val-balance').innerText = '$' + data.balance.toFixed(2);
                         if (!data.dryRun) document.getElementById('bot-mode').style.color = 'var(--accent-red)';
+                        setRunningState(data.running ?? true);
                     }
                     else if (data.type === 'stats') {
                         document.getElementById('val-balance').innerText = '$' + data.balance.toFixed(2);
                         const pnlEl = document.getElementById('val-pnl');
                         pnlEl.innerText = (data.pnl >= 0 ? '+' : '') + '$' + data.pnl.toFixed(2);
                         pnlEl.className = 'card-value ' + (data.pnl >= 0 ? 'positive' : 'negative');
-                        
                         document.getElementById('val-trades').innerText = (data.wins + data.losses).toString();
                         const wr = (data.wins + data.losses > 0) ? ((data.wins / (data.wins + data.losses)) * 100).toFixed(1) : '0.0';
                         document.getElementById('val-winrate').innerText = wr + '%';
                     }
+                    else if (data.type === 'paused')  { setRunningState(false); }
+                    else if (data.type === 'resumed') { setRunningState(true);  }
                     else if (data.type === 'log') {
-                        const row = document.createElement('div');
-                        row.className = 'log-row';
-                        const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-                        
-                        // Parse tags
                         let tagClass = 'oms';
-                        let content = data.msg;
-                        if (content.includes('[FEED]')) tagClass = 'feed';
-                        else if (content.includes('[ENGINE]')) tagClass = 'engine';
-                        else if (content.includes('[SIGNAL]')) tagClass = 'signal';
-                        else if (content.includes('[FILL]')) tagClass = 'fill';
-                        else if (content.includes('[HALT]')) tagClass = 'halt';
-
-                        row.innerHTML = `<span class="log-time">${time}</span><span class="log-tag ${tagClass}">${content}</span>`;
-                        terminal.appendChild(row);
-
-                        // Keep max 200 lines
-                        if (terminal.childElementCount > 200) {
-                            terminal.removeChild(terminal.firstChild);
-                        }
-                        
-                        // Auto-scroll
-                        terminal.scrollTop = terminal.scrollHeight;
+                        const msg = data.msg;
+                        if (msg.includes('[FEED]'))   tagClass = 'feed';
+                        else if (msg.includes('[ENGINE]')) tagClass = 'engine';
+                        else if (msg.includes('[SIGNAL]')) tagClass = 'signal';
+                        else if (msg.includes('[FILL]'))   tagClass = 'fill';
+                        else if (msg.includes('[HALT]'))   tagClass = 'halt';
+                        addLog(msg, tagClass);
                     }
                 } catch (e) {
-                    console.error("Failed to parse websocket msg", e);
+                    console.error('Failed to parse websocket msg', e);
                 }
             };
         }

@@ -98,10 +98,30 @@ const server = http.createServer((req, res) => {
   }
 });
 
+let _botRunning = true;
+
 const wss = new WebSocketServer({ server });
 wss.on('connection', (ws) => {
-  ws.send(JSON.stringify({ type: 'init', dryRun: cfg.dryRun, symbol: cfg.symbol, balance: accountBalance }));
+  ws.send(JSON.stringify({ type: 'init', dryRun: cfg.dryRun, symbol: cfg.symbol, balance: accountBalance, running: _botRunning }));
   ws.send(JSON.stringify({ type: 'stats', ...stats }));
+
+  // Handle Start/Stop commands from the dashboard browser
+  ws.on('message', (raw) => {
+    try {
+      const msg = JSON.parse(raw.toString()) as { cmd?: string };
+      if (msg.cmd === 'stop' && _botRunning) {
+        _botRunning = false;
+        omsWorker.postMessage({ cmd: 'pause' });
+        wss.clients.forEach(c => { if (c.readyState === 1) c.send(JSON.stringify({ type: 'paused' })); });
+        console.log('[DASHBOARD] ⏸ Bot PAUSED by user');
+      } else if (msg.cmd === 'start' && !_botRunning) {
+        _botRunning = true;
+        omsWorker.postMessage({ cmd: 'resume' });
+        wss.clients.forEach(c => { if (c.readyState === 1) c.send(JSON.stringify({ type: 'resumed' })); });
+        console.log('[DASHBOARD] ▶ Bot RESUMED by user');
+      }
+    } catch { /* ignore bad messages */ }
+  });
 });
 
 const DASHBOARD_PORT = parseInt(process.env['PORT'] ?? '8080', 10);

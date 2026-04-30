@@ -55,6 +55,7 @@ let _currentBalance = accountBalance;
 let _wins   = 0;
 let _losses = 0;
 let _halted = false;
+let _paused = false; // controlled by dashboard Start/Stop buttons
 
 const _breaker = new CircuitBreaker(
   (workerData.maxDrawdownUsd as number | undefined) ?? 500
@@ -150,6 +151,7 @@ async function onSignal(msg: {
   timestamp: number;
 }): Promise<void> {
   if (_halted) { parentPort?.postMessage({ type: 'status', msg: 'Signal ignored — bot halted.' }); return; }
+  if (_paused) { parentPort?.postMessage({ type: 'status', msg: 'Signal ignored — bot paused by user.' }); return; }
   if (_position !== 'flat') { parentPort?.postMessage({ type: 'status', msg: 'Signal ignored — position open.' }); return; }
 
   // Reject stale signals
@@ -292,6 +294,13 @@ omsPort.on('message', (msg: unknown) => {
   if (typeof m?.signal === 'number') {
     void onSignal(m as Parameters<typeof onSignal>[0]);
   }
+});
+
+// ── Pause / Resume commands from main thread (dashboard buttons) ──────────────
+parentPort?.on('message', (msg: unknown) => {
+  const m = msg as { cmd?: string };
+  if (m?.cmd === 'pause')  { _paused = true;  parentPort?.postMessage({ type: 'status', msg: '⏸ Bot paused — no new trades.' }); }
+  if (m?.cmd === 'resume') { _paused = false; parentPort?.postMessage({ type: 'status', msg: '▶ Bot resumed — scanning for signals.' }); }
 });
 
 // ── Monitor loop (every 100ms for faster stop detection) ─────────────────────

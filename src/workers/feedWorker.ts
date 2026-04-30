@@ -29,11 +29,13 @@ const _bids: [number, number][] = Array.from({ length: DEPTH }, () => [0, 0]);
 const _asks: [number, number][] = Array.from({ length: DEPTH }, () => [0, 0]);
 
 const WS_URL = 'wss://ws.kraken.com/v2';
+let _reconnectDelay = 1000; // start at 1s, backs off to 30s max
 
 function connect(): void {
   const ws = new WebSocket(WS_URL);
 
   ws.on('open', () => {
+    _reconnectDelay = 1000; // reset on successful connect
     parentPort?.postMessage({ type: 'status', msg: `Feed connected to ${WS_URL}` });
     ws.send(JSON.stringify({
       method: 'subscribe',
@@ -78,8 +80,9 @@ function connect(): void {
   });
 
   ws.on('close', () => {
-    parentPort?.postMessage({ type: 'status', msg: 'Feed disconnected — reconnecting in 1s' });
-    setTimeout(connect, 1000);
+    parentPort?.postMessage({ type: 'status', msg: `Feed disconnected — reconnecting in ${_reconnectDelay / 1000}s` });
+    setTimeout(connect, _reconnectDelay);
+    _reconnectDelay = Math.min(_reconnectDelay * 2, 30_000); // exponential backoff up to 30s
   });
 
   ws.on('error', (err: Error) => {
