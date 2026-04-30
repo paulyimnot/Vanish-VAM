@@ -56,6 +56,21 @@ let _wins   = 0;
 let _losses = 0;
 let _halted = false;
 let _paused = false; // controlled by dashboard Start/Stop buttons
+let _entryTimestamp = 0;  // for 24h max hold enforcement
+const MAX_HOLD_MS = 24 * 60 * 60_000; // force-close after 24 hours
+
+// ── Daily PnL reset at UTC midnight ──────────────────────────────────────────
+function scheduleMidnightReset(): void {
+  const now = new Date();
+  const msUntilMidnight =
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).getTime() - Date.now();
+  setTimeout(() => {
+    _dailyPnl = 0;
+    _halted   = false; // un-halt daily loss circuit breaker at day start
+    parentPort?.postMessage({ type: 'status', msg: '🌅 New trading day — daily P&L reset.' });
+    scheduleMidnightReset();
+  }, msUntilMidnight);
+}
 
 const _breaker = new CircuitBreaker(
   (workerData.maxDrawdownUsd as number | undefined) ?? 500
@@ -67,11 +82,12 @@ const SIGNAL_MAX_AGE_MS = 3_000; // reject signals older than 3 seconds
 // Risk a fixed % of current balance per trade.
 // positionSize (BTC) = (balance * riskPct) / (stopDistance in USD)
 function calcPositionSize(price: number, atr: number): number {
-  const stopDistanceUsd = price * atr * stopAtrMult / price; // = atr * stopAtrMult (in USD per BTC)
-  if (stopDistanceUsd <= 0) return 0.001; // safe fallback
+  const stopDistanceUsd = atr * stopAtrMult;
+  if (stopDistanceUsd <= 0) return 0.001;
   const rawSize = (_currentBalance * riskPerTrade) / stopDistanceUsd;
-  // Clamp removed for altcoins/memecoins. Rely purely on account risk %.
-  return parseFloat(rawSize.toFixed(8));
+  // Cap at 20% of balance to prevent over-exposure on meme coins
+  const maxSize = (_currentBalance * 0.20) / price;
+  return parseFloat(Math.min(rawSize, maxSize).toFixed(8));
 }
 
 // ── Kraken REST signing ───────────────────────────────────────────────────────
@@ -114,25 +130,33 @@ function krakenPost(path: string, params: Record<string, string>): Promise<Recor
   });
 }
 
-async function placeLimitOrder(side: 'buy' | 'sell', price: number, qty: number): Promise<string | null> {
+async function placeLimitOrder(
+  side: 'buy' | 'sell',
+  price: number,
+  qty: number,
+  postOnly = false,   // ← true for exits (maker rebate), false for aggressive entries
+): Promise<string | null> {
   if (dryRun) {
     const id = `DRY-${Date.now()}-${side}`;
-    parentPort?.postMessage({ type: 'order', msg: `[DRY RUN] ${side.toUpperCase()} ${qty} @ ${price.toFixed(2)} → ${id}` });
+    parentPort?.postMessage({ type: 'order', msg: `[DRY RUN] ${side.toUpperCase()} ${qty} @ ${price.toFixed(6)} → ${id}` });
     return id;
   }
   try {
-    const result = await krakenPost('/0/private/AddOrder', {
+    const orderParams: Record<string, string> = {
       ordertype: 'limit',
       type:      side,
       volume:    String(qty),
-      price:     price.toFixed(2),
+      price:     price.toFixed(6),
       pair:      symbol.replace('/', ''),
-      oflags:    'post', // maker-only
-    });
+    };
+    // Only use post-only (maker) flag on exit orders — entry must fill immediately
+    if (postOnly) orderParams['oflags'] = 'post';
+
+    const result = await krakenPost('/0/private/AddOrder', orderParams);
     const errors = result['error'] as string[] | undefined;
     if (errors?.length) throw new Error(errors.join(', '));
     const txid = (result['result'] as Record<string, string[]> | undefined)?.['txid']?.[0] ?? null;
-    parentPort?.postMessage({ type: 'order', msg: `${side.toUpperCase()} ${qty} @ ${price.toFixed(2)} → ${txid}` });
+    parentPort?.postMessage({ type: 'order', msg: `${side.toUpperCase()} ${qty} @ ${price.toFixed(6)} → ${txid}` });
     return txid;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -181,6 +205,7 @@ async function onSignal(msg: {
 
   _position           = msg.signal === 1 ? 'long' : 'short';
   _entryPrice         = entryPrice;
+  _entryTimestamp     = Date.now();
   _stopPrice          = msg.stop;
   _targetPrice        = msg.target;
   _tradeAtr           = msg.atr;
@@ -234,15 +259,21 @@ async function monitorPosition(): Promise<void> {
   }
 
   // ── Check exit conditions ──────────────────────────────────────────────────
-  const hitTarget = _position === 'long' ? currentPrice >= _targetPrice : currentPrice <= _targetPrice;
-  const hitStop   = _position === 'long' ? currentPrice <= _stopPrice   : currentPrice >= _stopPrice;
+  const hitTarget  = _position === 'long' ? currentPrice >= _targetPrice : currentPrice <= _targetPrice;
+  const hitStop    = _position === 'long' ? currentPrice <= _stopPrice   : currentPrice >= _stopPrice;
+  const hitMaxHold = (Date.now() - _entryTimestamp) >= MAX_HOLD_MS;
 
-  if (!hitTarget && !hitStop) return;
+  if (!hitTarget && !hitStop && !hitMaxHold) return;
+
+  if (hitMaxHold && !hitTarget && !hitStop) {
+    parentPort?.postMessage({ type: 'status', msg: `⏰ 24h max hold reached — force-closing position` });
+  }
 
   const exitSide  = _position === 'long' ? 'sell' : 'buy';
   const exitPrice = hitTarget ? _targetPrice : _stopPrice;
 
-  await placeLimitOrder(exitSide, exitPrice, _tradeQty);
+  // Use post-only (maker) flag on exits to save fees; aggressive fill on entry only
+  await placeLimitOrder(exitSide, exitPrice, _tradeQty, true);
 
   const rawPnl = _position === 'long'
     ? (exitPrice - _entryPrice) * _tradeQty
@@ -307,4 +338,5 @@ parentPort?.on('message', (msg: unknown) => {
 // ── Monitor loop (every 100ms for faster stop detection) ─────────────────────
 setInterval(() => { void monitorPosition(); }, 100);
 
+scheduleMidnightReset();
 parentPort?.postMessage({ type: 'status', msg: `OMS ready | DryRun: ${dryRun} | Balance: $${accountBalance}` });
